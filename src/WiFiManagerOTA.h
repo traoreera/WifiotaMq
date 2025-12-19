@@ -32,6 +32,12 @@ public:
     {
         String ssid;
         String password;
+        bool useStaticIP;  
+        String staticIP;   
+        String subnet;    
+        String gateway;    
+        String dns1;       
+        String dns2;    
     };
 
     void setLogger(bool active =true);
@@ -70,6 +76,12 @@ private:
         String password;
         String topic;
         String user_id;
+        bool useStaticIP;  
+        String staticIP;   
+        String subnet;    
+        String gateway;    
+        String dns1;       
+        String dns2;  
     };
 
     Preferences prefs;

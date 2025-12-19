@@ -3,9 +3,8 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <esp_task_wdt.h>
+#include "WiFiManagerOTA.h"
 #include <cfloat>
-
 // ═══════════════════════════════════════════════════════════
 // GESTIONNAIRE DE BUFFER CIRCULAIRE pour logs
 // ═══════════════════════════════════════════════════════════
@@ -179,46 +178,12 @@ public:
 // ═══════════════════════════════════════════════════════════
 // GESTIONNAIRE DE TÂCHES PÉRIODIQUES
 // ═══════════════════════════════════════════════════════════
-class SystemWatchdog {
-public:
-    explicit SystemWatchdog(uint32_t timeoutMs = 8000)
-        : timeoutMs(timeoutMs) {}
 
-    void begin() {
-        esp_task_wdt_config_t config = {
-            .timeout_ms = timeoutMs,
-            .idle_core_mask = (1 << portNUM_PROCESSORS) - 1, // Surveille tous les cœurs
-            .trigger_panic = true,
-        };
-
-        esp_task_wdt_init(&config);
-        esp_task_wdt_add(NULL); // Ajoute la tâche actuelle (loop)
-        Serial.printf("[WATCHDOG] Initialisé avec timeout = %lu ms\n", timeoutMs);
-    }
-
-    void feed() {
-        esp_task_wdt_reset();
-    }
-
-    void end() {
-        esp_task_wdt_delete(NULL);
-        esp_task_wdt_deinit();
-        Serial.println("[WATCHDOG] Désactivé.");
-    }
-
+class TaskScheduler
+{
 private:
-    uint32_t timeoutMs;
-};
-
-#endif
-
-// ═══════════════════════════════════════════════════════════
-// GESTIONNAIRE DE TÂCHES PÉRIODIQUES
-// ═══════════════════════════════════════════════════════════
-
-class TaskScheduler {
-private:
-    struct Task {
+    struct Task
+    {
         String name;
         unsigned long interval;
         unsigned long lastRun;
@@ -231,34 +196,42 @@ private:
     int taskCount = 0;
 
 public:
-    bool addTask(const String &name, unsigned long intervalMs, void (*callback)()) {
-        if (taskCount >= MAX_TASKS) {
-            Serial.println("❌ Trop de tâches");
+    bool addTask(const String &name, unsigned long intervalMs, void (*callback)())
+    {
+        if (taskCount >= MAX_TASKS)
+        {
+            Serial.println("Trop de tâches");
             return false;
         }
         tasks[taskCount] = {name, intervalMs, millis(), callback, true};
         taskCount++;
-        Serial.println("✅ Tâche ajoutée: " + name + " (" + String(intervalMs) + "ms)");
+        Serial.println("Tâche ajoutée: " + name + " (" + String(intervalMs) + "ms)");
         return true;
     }
 
-    void run() {
+    void run()
+    {
         unsigned long now = millis();
-        for (int i = 0; i < taskCount; i++) {
-            if (!tasks[i].enabled) continue;
-            if (now - tasks[i].lastRun >= tasks[i].interval) {
+        for (int i = 0; i < taskCount; i++)
+        {
+            if (!tasks[i].enabled)
+                continue;
+            if (now - tasks[i].lastRun >= tasks[i].interval)
+            {
                 tasks[i].lastRun = now;
-                Serial.println("⏰ Exécution tâche: " + tasks[i].name);
                 tasks[i].callback();
             }
         }
     }
 
-    void setInterval(const String &name, unsigned long newInterval) {
-        for (int i = 0; i < taskCount; i++) {
-            if (tasks[i].name == name) {
+    void setInterval(const String &name, unsigned long newInterval)
+    {
+        for (int i = 0; i < taskCount; i++)
+        {
+            if (tasks[i].name == name)
+            {
                 tasks[i].interval = newInterval;
-                Serial.println("🔧 Intervalle modifié: " + name + " -> " + String(newInterval) + "ms");
+                Serial.println("Intervalle modifié: " + name + " -> " + String(newInterval) + "ms");
                 return;
             }
         }
@@ -666,7 +639,7 @@ public:
     bool isEnabled_logger = true;
 
     void setLevel(Level level) { currentLevel = level; }
-    void settLogger(bool active = true)
+    void setLogger(bool active = true)
     {
         isEnabled_logger = active;
     }

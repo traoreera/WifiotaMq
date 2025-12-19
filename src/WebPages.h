@@ -4,14 +4,15 @@
 #ifndef WEB_PAGES_H
 #define WEB_PAGES_H
 
-namespace WebPages {
+namespace WebPages
+{
   const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ESP32 - Accueil</title>
+  <title>TSP-Manager</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { 
@@ -79,7 +80,7 @@ namespace WebPages {
 </head>
 <body>
   <div class="container">
-    <h1>🌐 ESP32 Manager</h1>
+    <h1>🌐 Tanga System Portal Manager</h1>
     <p class="subtitle">Gestion WiFi & OTA</p>
     <div class="info-card">
       <div class="info-item">
@@ -118,7 +119,7 @@ namespace WebPages {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Configuration WiFi</title>
+  <title>TSPM-Config</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { 
@@ -191,11 +192,37 @@ namespace WebPages {
         <label for="user_id">👤 User ID</label>
         <input type="text" name="user_id" id="user_id" value="%USER_ID%" placeholder="device001" required>
       </div>
+      <div class="form-group">
+        <label for="useStaticIP">
+          <input type="checkbox" name="useStaticIP" id="useStaticIP" %USE_STATIC_IP%> Utiliser IP statique
+        </label>
+      </div>
+      <div class="form-group">
+        <label for="staticIP">🌐 Adresse IP statique</label>
+        <input type="text" name="staticIP" id="staticIP" value="%STATIC_IP%" placeholder="192.168.1.100" pattern="^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$">
+      </div>
+      <div class="form-group">
+        <label for="subnet">📏 Masque de sous-réseau</label>
+        <input type="text" name="subnet" id="subnet" value="%SUBNET%" placeholder="255.255.255.0" pattern="^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$">
+      </div>
+      <div class="form-group">
+        <label for="gateway">🚪 Passerelle</label>
+        <input type="text" name="gateway" id="gateway" value="%GATEWAY%" placeholder="192.168.1.1" pattern="^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$">
+      </div>
+      <div class="form-group">
+        <label for="dns1">🔍 DNS Primaire</label>
+        <input type="text" name="dns1" id="dns1" value="%DNS1%" placeholder="8.8.8.8" pattern="^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$">
+      </div>
+      <div class="form-group">
+        <label for="dns2">🔍 DNS Secondaire</label>
+        <input type="text" name="dns2" id="dns2" value="%DNS2%" placeholder="8.8.4.4" pattern="^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$">
+      </div>
       <button type="submit">💾 Enregistrer et Redémarrer</button>
     </form>
     <a href="/" class="back-link">← Retour</a>
   </div>
 </body>
+</html>
 </html>
   )rawliteral";
 
@@ -205,7 +232,7 @@ namespace WebPages {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Configuration MQTT</title>
+  <title>TSPM-Config</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { 

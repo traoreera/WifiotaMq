@@ -1,484 +1,924 @@
-# 🚀 Projet ESP32 Complet - Guide de Démarrage
+# WifiotaMq
 
-## 📦 Contenu du Package
+[![Arduino](https://img.shields.io/badge/Arduino-Library-00979D?logo=arduino)](https://www.arduino.cc/)
+[![ESP32](https://img.shields.io/badge/Platform-ESP32-E7352C?logo=espressif)](https://www.espressif.com/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](library.properties)
 
-Vous disposez maintenant d'un système complet pour ESP32 avec WiFi, MQTT et OTA.
+A comprehensive Arduino library for ESP32 that provides WiFi management, MQTT connectivity, and OTA (Over-The-Air) firmware updates through an intuitive web interface.
 
-### 📁 Structure des fichiers
+## ✨ Features
 
+- 🌐 **WiFi Management**
+  - Web-based configuration interface
+  - Automatic Access Point fallback mode
+  - WiFi network scanning and selection
+  - Static IP configuration support
+  - mDNS support (e.g., `http://esp32ota.local`)
+
+- 📡 **MQTT Controller**
+  - Secure (SSL/TLS) and insecure connections
+  - Automatic reconnection with exponential backoff
+  - Dynamic topic configuration
+  - Publish/Subscribe support
+  - Custom callback handling
+
+- 🔄 **OTA Updates**
+  - Web-based firmware updates via ElegantOTA
+  - Password-protected access
+  - Easy firmware deployment
+
+- 🔐 **Security**
+  - Web interface authentication
+  - SSL/TLS support for MQTT
+  - Configurable credentials
+
+- 🛠️ **Utility Classes** (12 included)
+  - Logger with multiple levels
+  - Statistics tracker
+  - Task scheduler
+  - Software watchdog
+  - Circular buffer
+  - Low-pass filter
+  - Change detector
+  - LED manager with patterns
+  - Config manager (NVS storage)
+  - Time formatter
+  - Serial commander
+  - Buzzer controller
+
+## 📋 Table of Contents
+
+- [Installation](#installation)
+- [Dependencies](#dependencies)
+- [Quick Start](#quick-start)
+- [Usage Examples](#usage-examples)
+- [API Documentation](#api-documentation)
+- [Utility Classes](#utility-classes)
+- [Web Interface](#web-interface)
+- [MQTT Topics](#mqtt-topics)
+- [Security](#security)
+- [Troubleshooting](#troubleshooting)
+- [Advanced Configuration](#advanced-configuration)
+- [Contributing](#contributing)
+- [License](#license)
+
+## 🚀 Installation
+
+### Arduino IDE
+
+1. Download this repository as a ZIP file
+2. In Arduino IDE: **Sketch** → **Include Library** → **Add .ZIP Library**
+3. Select the downloaded ZIP file
+4. Restart Arduino IDE
+
+### PlatformIO
+
+Add to your `platformio.ini`:
+
+```ini
+[env:esp32dev]
+platform = espressif32
+board = esp32dev
+framework = arduino
+lib_deps = 
+    https://github.com/traoreera/WifiotaMq.git
+    me-no-dev/ESPAsyncWebServer
+    me-no-dev/AsyncTCP
+    ayushsharma82/ElegantOTA
+    knolleary/PubSubClient
+    bblanchon/ArduinoJson
+monitor_speed = 115200
 ```
-esp32-project/
-├── src/
-│   ├── WiFiManagerOTA.h       # Gestionnaire WiFi/Web/OTA
-│   ├── MQTT.h                 # Contrôleur MQTT
-│   └── utilities.h            # 12 classes utilitaires
-├── exemples/
-│   ├── simples                # Version de base
-│   ├── otamqttinsecure        # Version avec mqtt insecures
-│   └── secure                 # Version securisée
-├── docs/
-```
 
-## ⚡ Démarrage Rapide (5 minutes)
+## 📦 Dependencies
 
-### Étape 1: Créer le projet
+This library requires the following dependencies:
 
-```bash
-# Créer un nouveau projet PlatformIO
-pio project init --board esp32dev
+- **ESPAsyncWebServer** - Async web server
+- **AsyncTCP** - Async TCP library for ESP32
+- **ElegantOTA** - OTA update library
+- **PubSubClient** - MQTT client
+- **ArduinoJson** - JSON parsing (optional, for utilities)
+- **Preferences** - ESP32 NVS storage (built-in)
 
-# Ou via VS Code: PlatformIO > New Project
-```
+## ⚡ Quick Start
 
-### Étape 2: Copier les fichiers
-
-```
-Copiez dans include/:
-  - WiFiManagerOTA.h
-  - MQTT.h
-  - utilities.h
-
-Copiez dans src/:
-  - main.cpp (ou advanced_main.cpp)
-
-Copiez à la racine:
-  - platformio.ini
-```
-
-### Étape 3: Compiler et téléverser
-
-```bash
-# Compiler
-pio run
-
-# Téléverser
-pio run --target upload
-
-# Moniteur série
-pio device monitor
-```
-
-### Étape 4: Configuration initiale
-
-1. **L'ESP32 démarre en mode AP**
-   ```
-   SSID: ESP32-Config
-   Password: 12345678
-   ```
-
-2. **Connectez-vous au WiFi** et ouvrez
-   ```
-   http://192.168.4.1
-   User: admin
-   Pass: admin123
-   ```
-
-3. **Configurez le WiFi**
-   - Cliquez sur "⚙️ WiFi"
-   - Sélectionnez votre réseau
-   - Entrez le mot de passe
-   - Topic: `home/sensor/`
-   - User ID: `device001`
-
-4. **Configurez MQTT**
-   - Cliquez sur "📡 MQTT"
-   - Hostname: votre broker MQTT
-   - Port: 8883 (SSL) ou 1883
-   - User/Password MQTT
-   - Client ID unique
-
-5. **Redémarrage automatique**
-   - L'ESP32 se connecte au WiFi
-   - Se connecte au broker MQTT
-   - Commence à publier
-
-## 🎯 Fonctionnalités Principales
-
-### ✅ WiFi & Web Interface
-- **Configuration WiFi** via interface web
-- **Scan WiFi** avec sélection du réseau
-- **Point d'accès** de secours automatique
-- **mDNS**: `http://esp32-device.local`
-- **Authentification** sur toutes les pages
-- **Design moderne** et responsive
-
-### ✅ MQTT
-- **Configuration** via interface web
-- **SSL/TLS** support (port 8883)
-- **Reconnexion automatique** avec backoff
-- **Queue de retry** pour messages perdus
-- **Topics dynamiques** configurables
-- **Callbacks** pour commandes
-
-### ✅ OTA (Over-The-Air)
-- **ElegantOTA** intégré
-- **Upload firmware** via navigateur
-- **Protégé** par authentification
-- **Accès**: `http://[IP]/update`
-
-### ✅ Utilitaires Avancés (12 classes)
-1. **CircularBuffer**: Queue FIFO générique
-2. **Statistics**: Min, max, moyenne, écart-type
-3. **SoftwareWatchdog**: Surveillance système
-4. **TaskScheduler**: Tâches périodiques
-5. **LowPassFilter**: Filtrage de signal
-6. **ChangeDetector**: Détection changements
-7. **LEDManager**: Patterns LED (heartbeat, pulse, etc.)
-8. **ConfigManager**: Sauvegarde flash
-9. **Logger**: Logs multi-niveaux + MQTT
-10. **MQTTHelper**: Retry automatique
-11. **TimeFormatter**: Formatage affichage
-12. **SerialCommander**: Commandes série
-
-## 📡 Exemples d'utilisation
-
-### Exemple 1: Version de base (main.cpp)
+### Basic WiFi + OTA Example
 
 ```cpp
 #include "WiFiManagerOTA.h"
-#include "MQTT.h"
 
 bool wifi_connected = false;
 WiFiManagerOTA wifiManager(80, "admin", "admin123");
-MQTTController* mqttController = nullptr;
-
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-    String msg = String((char*)payload).substring(0, length);
-    if (msg == "status") {
-        mqttController->publish("{\"status\":\"ok\"}");
-    }
-}
 
 void setup() {
     Serial.begin(115200);
-    wifiManager.begin("esp32-device", "ESP32-Config", "12345678");
     
-    if (wifi_connected) {
-        auto cfg = wifiManager.getMqttConfig();
-        mqttController = new MQTTController(
-            cfg.hostname.c_str(), cfg.port,
-            cfg.user.c_str(), cfg.password.c_str()
-        );
-        mqttController->setClientId(cfg.client);
-        mqttController->setPublishTopic(wifiManager.pubTopic("v1/"));
-        mqttController->setSubscribeTopic(wifiManager.cmdTopic("v1/", "/cmd"));
-        mqttController->begin();
-    }
+    // Start WiFi manager with:
+    // - mDNS hostname: "esp32ota" (access via http://esp32ota.local)
+    // - AP name: "ESP32-Config"
+    // - AP password: "12345678"
+    wifiManager.begin("esp32ota", "ESP32-Config", "12345678");
 }
 
 void loop() {
     wifiManager.loop();
     wifiManager.handleWiFiReconnect();
-    if (wifi_connected && mqttController) {
-        mqttController->loop();
-    }
     delay(10);
 }
 ```
 
-### Exemple 2: Avec utilitaires (advanced_main.cpp)
+### First Time Setup
 
-Version complète avec logger, scheduler, watchdog, statistiques, etc.
-Voir le fichier `advanced_main.cpp` pour l'implémentation complète.
+1. **Power on your ESP32** - It will create a WiFi Access Point
+2. **Connect to the AP**:
+   - SSID: `ESP32-Config`
+   - Password: `12345678`
+3. **Open your browser** and navigate to: `http://192.168.4.1`
+4. **Login** with default credentials:
+   - Username: `admin`
+   - Password: `admin123`
+5. **Configure WiFi**:
+   - Click on "⚙️ WiFi" or "Config"
+   - Select your WiFi network
+   - Enter password
+   - Save configuration
+6. **ESP32 will restart** and connect to your WiFi network
+7. **Access via mDNS**: `http://esp32ota.local` (or use the IP address shown in serial monitor)
 
-### Exemple 3: Capteur DHT22 (examples.cpp)
+## 📚 Usage Examples
+
+### Example 1: Simple WiFi + OTA
 
 ```cpp
-#define EXAMPLE_DHT22
-#include "examples.cpp"
+#include "WiFiManagerOTA.h"
+#include "utilities.h"
+
+bool wifi_connected = false;
+WiFiManagerOTA server(80, "admin", "admin123");
+Logger logger;
+
+void setup() {
+    logger.setLevel(logger.INFO);
+    logger.isEnabled = true;
+    
+    logger.info("╔══════════════════════════════════════════╗");
+    logger.info("║   Simple OTA Server Initialization      ║");
+    logger.info("╚══════════════════════════════════════════╝");
+    
+    server.begin("esp32ota", "ESP32-Config", "12345678");
+}
+
+void loop() {
+    server.loop();
+    server.handleWiFiReconnect();
+}
 ```
 
-### Exemple 4: Contrôle de relais (examples.cpp)
+### Example 2: WiFi + MQTT (Insecure)
 
 ```cpp
-#define EXAMPLE_RELAY_CONTROL
-#include "examples.cpp"
+#include "mqtt.h"
+#include "WiFiManagerOTA.h"
+#include "utilities.h"
+
+Logger logger;
+bool wifi_connected = false;
+WiFiManagerOTA server(80, "admin", "admin123");
+MQTTController* mqttController = nullptr;
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+    String message;
+    for (int i = 0; i < length; i++) {
+        message += (char)payload[i];
+    }
+    logger.info("Message received: " + message);
+    
+    // Handle commands
+    if (message == "status") {
+        String status = "{\"status\":\"online\",\"uptime\":" + String(millis()) + "}";
+        mqttController->publish(status);
+    }
+}
+
+void setup() {
+    logger.setLevel(logger.INFO);
+    logger.isEnabled = true;
+    
+    String clientId = "esp32_" + String((uint32_t)ESP.getEfuseMac(), HEX);
+    
+    server.begin("esp32ota", "ESP32-Config", "12345678");
+    
+    if (wifi_connected) {
+        auto cfg = server.getMqttConfig();
+        mqttController = new MQTTController(
+            cfg.hostname.c_str(),
+            cfg.port,
+            cfg.user.c_str(),
+            cfg.password.c_str()
+        );
+        
+        mqttController->setClientId(clientId);
+        mqttController->setPublishTopic(server.pubTopic("v1/"));
+        mqttController->setSubscribeTopic(server.cmdTopic("v1/", "/cmd"));
+        mqttController->isSecure = false;  // Insecure connection
+        mqttController->begin();
+    }
+}
+
+void loop() {
+    server.loop();
+    
+    if (wifi_connected && mqttController) {
+        mqttController->loop();
+        
+        // Publish sensor data every 60 seconds
+        static unsigned long lastPublish = 0;
+        if (millis() - lastPublish > 60000) {
+            String json = "{";
+            json += "\"ssid\":\"" + String(WiFi.SSID()) + "\",";
+            json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
+            json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
+            json += "\"freeHeap\":" + String(ESP.getFreeHeap());
+            json += "}";
+            
+            mqttController->publish(json);
+            lastPublish = millis();
+        }
+    }
+    
+    server.handleWiFiReconnect();
+}
 ```
 
-## 🔧 Configuration Avancée
-
-### Changer les identifiants OTA
+### Example 3: WiFi + MQTT (Secure with SSL/TLS)
 
 ```cpp
-WiFiManagerOTA wifiManager(80, "votre_user", "votre_password");
-```
+#include "mqtt.h"
+#include "WiFiManagerOTA.h"
+#include "utilities.h"
 
-### Changer le hostname mDNS
+Logger logger;
+bool wifi_connected = false;
+WiFiManagerOTA server(80, "admin", "admin123");
+MQTTController* mqttController = nullptr;
 
-```cpp
-wifiManager.begin("mon-esp32", "ESP32-Config", "12345678");
-// Accès: http://mon-esp32.local
-```
-
-### Personnaliser les topics MQTT
-
-```cpp
-// Dans /config de l'interface web:
-Topic: home/sensor/           // Préfixe
-User ID: salon                // Suffixe
-
-// Résultat:
-// Pub: home/sensor/v1/salon
-// Sub: home/sensor/v1/salon/cmd
-```
-
-### Activer SSL/TLS MQTT
-
-```cpp
-// Dans MQTT.h, modifier connectMQTT():
+// Root CA Certificate (replace with your broker's certificate)
 const char* root_ca = R"EOF(
 -----BEGIN CERTIFICATE-----
-[Votre certificat CA]
+MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh
+... (your certificate here) ...
 -----END CERTIFICATE-----
 )EOF";
 
-// Remplacer:
-secureClient.setInsecure();
-// Par:
-secureClient.setCACert(root_ca);
-```
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+    String message;
+    for (int i = 0; i < length; i++) {
+        message += (char)payload[i];
+    }
+    logger.info("Message received: " + message);
+}
 
-## 📊 Commandes MQTT Disponibles
+void setup() {
+    logger.setLevel(logger.INFO);
+    logger.isEnabled = true;
+    
+    String clientId = "esp32_" + String((uint32_t)ESP.getEfuseMac(), HEX);
+    
+    server.begin("esp32ota", "ESP32-Config", "12345678");
+    
+    if (wifi_connected) {
+        auto cfg = server.getMqttConfig();
+        mqttController = new MQTTController(
+            cfg.hostname.c_str(),
+            cfg.port,
+            cfg.user.c_str(),
+            cfg.password.c_str()
+        );
+        
+        mqttController->setClientId(clientId);
+        mqttController->setPublishTopic(server.pubTopic("v1/"));
+        mqttController->setSubscribeTopic(server.cmdTopic("v1/", "/cmd"));
+        
+        // Enable secure connection
+        mqttController->isSecure = true;
+        mqttController->setSecure(root_ca);
+        
+        mqttController->begin();
+    }
+}
 
-Publiez ces commandes sur le topic: `home/sensor/v1/device001/cmd`
-
-| Commande | Description | Réponse |
-|----------|-------------|---------|
-| `status` | Statut système complet | JSON avec infos |
-| `stats` | Statistiques | JSON statistiques |
-| `reset_stats` | Reset statistiques | Confirmation |
-| `ping` | Test connectivité | `{"response":"pong"}` |
-| `reboot` | Redémarrer | Redémarrage ESP32 |
-| `led:on` | LED allumée | Confirmation |
-| `led:off` | LED éteinte | Confirmation |
-| `led:heartbeat` | Pattern heartbeat | Confirmation |
-| `led:blink_fast` | Clignotement rapide | Confirmation |
-| `interval:30000` | Changer intervalle | Nouvel intervalle |
-| `log:debug` | Niveau log debug | Confirmation |
-
-## 💻 Commandes Série Disponibles
-
-Tapez dans le moniteur série:
-
-| Commande | Description |
-|----------|-------------|
-| `help` | Afficher l'aide |
-| `status` | Statut système |
-| `stats` | Statistiques |
-| `wifi` | Informations WiFi |
-| `mqtt` | Informations MQTT |
-| `tasks` | Liste des tâches |
-| `led <pattern>` | Changer LED |
-| `config` | Configuration |
-| `reset` | Redémarrer |
-
-## 🔍 Monitoring & Débogage
-
-### Moniteur série
-
-```bash
-pio device monitor --baud 115200
-```
-
-### Logs détaillés
-
-Dans `platformio.ini`:
-```ini
-build_flags = 
-    -D DEBUG_ESP_PORT=Serial
-    -D DEBUG_ESP_WIFI
-    -D CORE_DEBUG_LEVEL=5
-```
-
-### Page de statut JSON
-
-Accédez à: `http://[IP]/status`
-
-Retourne:
-```json
-{
-  "ssid": "MonWiFi",
-  "ip": "192.168.1.100",
-  "rssi": -65,
-  "uptime": "2j 5h 30m",
-  "freeHeap": 45231,
-  "chipModel": "ESP32-D0WDQ6",
-  "cpuFreq": 240
+void loop() {
+    server.loop();
+    
+    if (wifi_connected && mqttController) {
+        mqttController->loop();
+    }
+    
+    server.handleWiFiReconnect();
 }
 ```
 
-## 🐛 Dépannage
+## 📖 API Documentation
 
-### L'ESP32 ne se connecte pas au WiFi
+### WiFiManagerOTA Class
 
-**Symptômes**: Reste en mode AP
+#### Constructor
 
-**Solutions**:
-1. Vérifier SSID et mot de passe
-2. Réseau en 2.4 GHz (pas 5 GHz)
-3. Signal suffisamment fort
-4. Reset config: `http://[IP]/reset`
+```cpp
+WiFiManagerOTA(uint16_t port = 80, const char* user = "admin", const char* pass = "admin123")
+```
 
-### MQTT ne se connecte pas
+Creates a WiFiManagerOTA instance.
 
-**Symptômes**: Pas de messages publiés
+**Parameters:**
+- `port` - Web server port (default: 80)
+- `user` - Web interface username (default: "admin")
+- `pass` - Web interface password (default: "admin123")
 
-**Solutions**:
-1. Vérifier broker accessible
-2. Port correct (1883 ou 8883)
-3. Identifiants valides
-4. Vérifier logs série: `MQTT State: -4`
-   - `-4`: Timeout
+#### Methods
+
+##### `void begin(String hostname, String apName, String apPassword)`
+
+Initializes the WiFi manager.
+
+**Parameters:**
+- `hostname` - mDNS hostname (e.g., "esp32ota" → http://esp32ota.local)
+- `apName` - Access Point SSID when in AP mode
+- `apPassword` - Access Point password (min 8 characters)
+
+##### `void loop()`
+
+Must be called in the main loop to handle web server requests.
+
+##### `void handleWiFiReconnect()`
+
+Handles automatic WiFi reconnection. Call this in your main loop.
+
+##### `MQTTConfig getMqttConfig()`
+
+Returns the MQTT configuration stored in NVS.
+
+**Returns:** `MQTTConfig` struct with hostname, port, user, password, and client ID.
+
+##### `WiFiConfigStruct getWiFiConfig()`
+
+Returns the WiFi configuration.
+
+**Returns:** `WiFiConfigStruct` with SSID, password, and static IP settings.
+
+##### `String pubTopic(String version)`
+
+Generates the publish topic based on configuration.
+
+**Parameters:**
+- `version` - Version prefix (e.g., "v1/")
+
+**Returns:** Complete publish topic (e.g., "home/sensor/v1/device001")
+
+##### `String cmdTopic(String version, String cmd)`
+
+Generates the command/subscribe topic.
+
+**Parameters:**
+- `version` - Version prefix (e.g., "v1/")
+- `cmd` - Command suffix (e.g., "/cmd")
+
+**Returns:** Complete command topic (e.g., "home/sensor/v1/device001/cmd")
+
+##### `void loadConfig()` / `void saveConfig()`
+
+Load/save WiFi configuration from/to NVS.
+
+##### `void loadMqttConfig()` / `void saveMqttConfig()`
+
+Load/save MQTT configuration from/to NVS.
+
+##### `void resetConfig()`
+
+Resets all configuration to defaults.
+
+##### `bool hasValidConfig()`
+
+Checks if valid WiFi configuration exists.
+
+**Returns:** `true` if WiFi credentials are configured.
+
+### MQTTController Class
+
+#### Constructor
+
+```cpp
+MQTTController(const char* mqtt_server, int mqtt_port, const char* mqtt_user, const char* mqtt_password)
+```
+
+Creates an MQTT controller instance.
+
+#### Methods
+
+##### `void begin()`
+
+Initializes MQTT connection. Call after setting topics and client ID.
+
+##### `void loop()`
+
+Handles MQTT connection and reconnection. Must be called in main loop.
+
+##### `bool publish(const char* topic, const String& message)`
+
+Publishes a message to a specific topic.
+
+**Returns:** `true` if successful.
+
+##### `bool publish(const String& message)`
+
+Publishes to the configured publish topic.
+
+**Returns:** `true` if successful.
+
+##### `void setPublishTopic(const String& topic)`
+
+Sets the default publish topic.
+
+##### `void setSubscribeTopic(const String& topic)`
+
+Sets the subscribe topic and subscribes if connected.
+
+##### `void setClientId(const String& id)`
+
+Sets the MQTT client ID.
+
+##### `void setSecure(const char* caCert)`
+
+Sets the CA certificate for SSL/TLS connection.
+
+#### Properties
+
+##### `bool isSecure`
+
+Set to `true` for SSL/TLS connection, `false` for insecure (default: `false`).
+
+## 🛠️ Utility Classes
+
+The library includes 12 utility classes for common tasks:
+
+### 1. Logger
+
+Multi-level logging system with DEBUG, INFO, WARNING, ERROR, and CRITICAL levels.
+
+```cpp
+Logger logger;
+logger.setLevel(logger.INFO);
+logger.isEnabled = true;
+
+logger.debug("Debug message");
+logger.info("Info message");
+logger.warning("Warning message");
+logger.error("Error message");
+logger.critical("Critical message");
+```
+
+### 2. Statistics
+
+Track min, max, average, and standard deviation.
+
+```cpp
+Statistics stats;
+stats.addValue(25.5);
+stats.addValue(26.3);
+stats.addValue(24.8);
+
+Serial.println("Min: " + String(stats.getMin()));
+Serial.println("Max: " + String(stats.getMax()));
+Serial.println("Avg: " + String(stats.getAverage()));
+Serial.println("StdDev: " + String(stats.getStdDev()));
+Serial.println(stats.toJSON());
+```
+
+### 3. TaskScheduler
+
+Schedule periodic tasks without blocking.
+
+```cpp
+TaskScheduler scheduler;
+
+void readSensor() {
+    Serial.println("Reading sensor...");
+}
+
+void setup() {
+    scheduler.addTask("sensor", 5000, readSensor);  // Every 5 seconds
+}
+
+void loop() {
+    scheduler.run();
+}
+```
+
+### 4. SoftwareWatchdog
+
+Monitor system health and auto-restart on timeout.
+
+```cpp
+SoftwareWatchdog watchdog("main", 60000);  // 60 second timeout
+
+void setup() {
+    watchdog.enable();
+}
+
+void loop() {
+    watchdog.feed();  // Reset watchdog
+    // Your code here
+    watchdog.check();  // Will restart if timeout exceeded
+}
+```
+
+### 5. CircularBuffer
+
+FIFO queue with fixed size.
+
+```cpp
+CircularBuffer<String, 10> buffer;
+
+buffer.push("Message 1");
+buffer.push("Message 2");
+
+String msg;
+if (buffer.pop(msg)) {
+    Serial.println(msg);
+}
+```
+
+### 6. LowPassFilter
+
+Smooth noisy sensor readings.
+
+```cpp
+LowPassFilter filter(0.1);  // Smoothing factor
+
+float rawValue = analogRead(A0);
+float smoothed = filter.filter(rawValue);
+```
+
+### 7. ChangeDetector
+
+Detect significant changes with hysteresis.
+
+```cpp
+ChangeDetector detector(1.0);  // Threshold of 1.0
+
+float newValue = readSensor();
+if (detector.hasChanged(newValue)) {
+    Serial.println("Value changed significantly!");
+}
+```
+
+### 8. LEDManager
+
+Control LED with various patterns.
+
+```cpp
+LEDManager led(LED_BUILTIN);
+
+led.setPattern("heartbeat");  // Options: off, on, blink_slow, blink_fast, pulse, heartbeat
+
+void loop() {
+    led.update();
+}
+```
+
+### 9. ConfigManager
+
+Store configuration in NVS flash.
+
+```cpp
+ConfigManager config("myapp");
+
+config.saveString("ssid", "MyWiFi");
+config.saveInt("interval", 5000);
+config.saveBool("enabled", true);
+
+String ssid = config.loadString("ssid");
+int interval = config.loadInt("interval");
+bool enabled = config.loadBool("enabled");
+```
+
+### 10. TimeFormatter
+
+Format time and data sizes.
+
+```cpp
+String uptime = TimeFormatter::formatUptime(millis());
+String memory = TimeFormatter::formatBytes(ESP.getFreeHeap());
+String signal = TimeFormatter::formatRSSI(WiFi.RSSI());
+```
+
+### 11. SerialCommander
+
+Handle serial commands.
+
+```cpp
+void handleCommand(String cmd, String args) {
+    if (cmd == "status") {
+        Serial.println("System OK");
+    } else if (cmd == "restart") {
+        ESP.restart();
+    }
+}
+
+SerialCommander commander(handleCommand);
+
+void loop() {
+    commander.process();
+}
+```
+
+### 12. Buzzer
+
+Control buzzer with patterns.
+
+```cpp
+Buzzer buzzer(BUZZER_PIN);
+
+void setup() {
+    buzzer.begin();
+    buzzer.setPattern("alert");  // Options: off, alert, warning
+}
+
+void loop() {
+    buzzer.update();
+}
+```
+
+## 🌐 Web Interface
+
+### Accessing the Interface
+
+1. **Via mDNS**: `http://[hostname].local` (e.g., `http://esp32ota.local`)
+2. **Via IP**: `http://[ESP32_IP_ADDRESS]`
+3. **AP Mode**: `http://192.168.4.1`
+
+### Available Pages
+
+- **Home** (`/`) - System status and information
+- **WiFi Config** (`/config`) - Configure WiFi settings
+- **MQTT Config** (`/mqtt`) - Configure MQTT broker settings
+- **OTA Update** (`/update`) - Upload new firmware
+- **Status JSON** (`/status`) - JSON status endpoint
+- **Reset** (`/reset`) - Reset configuration
+
+### Configuration Options
+
+#### WiFi Configuration
+- SSID selection from scan
+- Password
+- Static IP settings (optional)
+- Gateway and DNS configuration
+
+#### MQTT Configuration
+- Broker hostname/IP
+- Port (1883 for insecure, 8883 for SSL/TLS)
+- Username and password
+- Client ID
+- Topic prefix
+- User ID (for topic generation)
+
+## 📡 MQTT Topics
+
+### Topic Structure
+
+The library uses a flexible topic structure:
+
+```
+[topic_prefix]/[version]/[user_id][suffix]
+```
+
+**Example:**
+- Topic Prefix: `home/sensor`
+- User ID: `device001`
+- Version: `v1/`
+
+**Results in:**
+- Publish Topic: `home/sensor/v1/device001`
+- Command Topic: `home/sensor/v1/device001/cmd`
+
+### Using Topics in Code
+
+```cpp
+// Set topics using helper methods
+mqttController->setPublishTopic(server.pubTopic("v1/"));
+mqttController->setSubscribeTopic(server.cmdTopic("v1/", "/cmd"));
+
+// Or set manually
+mqttController->setPublishTopic("home/sensor/v1/device001");
+mqttController->setSubscribeTopic("home/sensor/v1/device001/cmd");
+```
+
+### Publishing Messages
+
+```cpp
+// Publish to default topic
+mqttController->publish("{\"temperature\":25.5}");
+
+// Publish to specific topic
+mqttController->publish("custom/topic", "{\"data\":\"value\"}");
+```
+
+## 🔐 Security
+
+### Changing Default Credentials
+
+**⚠️ IMPORTANT:** Always change default credentials in production!
+
+```cpp
+// Change web interface credentials
+WiFiManagerOTA server(80, "your_username", "YourSecurePassword123!");
+```
+
+### Enabling SSL/TLS for MQTT
+
+1. **Obtain your broker's CA certificate**
+2. **Add it to your code:**
+
+```cpp
+const char* root_ca = R"EOF(
+-----BEGIN CERTIFICATE-----
+[Your CA Certificate Here]
+-----END CERTIFICATE-----
+)EOF";
+```
+
+3. **Enable secure connection:**
+
+```cpp
+mqttController->isSecure = true;
+mqttController->setSecure(root_ca);
+```
+
+### Security Best Practices
+
+✅ **DO:**
+- Change default web interface credentials
+- Use SSL/TLS for MQTT in production
+- Use strong passwords (min 12 characters)
+- Keep firmware updated
+- Use unique client IDs
+
+❌ **DON'T:**
+- Use default credentials in production
+- Use `setInsecure()` in production
+- Expose web interface to public internet without VPN
+- Hardcode sensitive credentials (use web config instead)
+
+## 🐛 Troubleshooting
+
+### ESP32 Won't Connect to WiFi
+
+**Symptoms:** Stays in AP mode
+
+**Solutions:**
+1. Verify SSID and password are correct
+2. Ensure WiFi network is 2.4GHz (ESP32 doesn't support 5GHz)
+3. Check signal strength (RSSI should be > -80 dBm)
+4. Reset configuration via web interface: `http://[IP]/reset`
+5. Check serial monitor for error messages
+
+### MQTT Connection Fails
+
+**Symptoms:** No messages published/received
+
+**Solutions:**
+1. Verify broker is accessible (ping the hostname/IP)
+2. Check port number (1883 for insecure, 8883 for SSL/TLS)
+3. Verify username and password
+4. Check MQTT state in serial monitor:
+   - `-4`: Connection timeout
    - `-3`: Connection lost
    - `-2`: Connect failed
    - `-1`: Disconnected
+   - `0`: Connected
+5. For SSL/TLS: Verify certificate is correct
+6. Check firewall rules on broker
 
-### Mémoire insuffisante
+### OTA Update Fails
 
-**Symptômes**: Crashes, reboots aléatoires
+**Symptoms:** Upload fails or ESP32 crashes
 
-**Solutions**:
+**Solutions:**
+1. Ensure stable WiFi connection
+2. Check firmware size (must fit in partition)
+3. Use correct partition scheme in `platformio.ini`:
+   ```ini
+   board_build.partitions = default.csv
+   ```
+4. Try uploading via `/update` endpoint directly
+5. Increase upload timeout in browser
+
+### Memory Issues
+
+**Symptoms:** Random crashes, reboots
+
+**Solutions:**
+1. Monitor free heap:
+   ```cpp
+   Serial.println("Free heap: " + String(ESP.getFreeHeap()));
+   ```
+2. If free heap < 50KB:
+   - Reduce buffer sizes
+   - Use `PROGMEM` for large strings
+   - Free unused objects
+   - Reduce JSON document sizes
+
+### Web Interface Not Accessible
+
+**Symptoms:** Cannot access web pages
+
+**Solutions:**
+1. Check ESP32 is connected to WiFi (check serial monitor)
+2. Verify IP address (shown in serial monitor)
+3. Try mDNS: `http://[hostname].local`
+4. Disable firewall temporarily
+5. Try different browser
+6. Clear browser cache
+
+## ⚙️ Advanced Configuration
+
+### Static IP Configuration
+
+Configure via web interface or programmatically:
+
 ```cpp
-// Surveiller:
-Serial.println(ESP.getFreeHeap());
-
-// Si < 50KB:
-// - Réduire taille buffers
-// - Utiliser PROGMEM
-// - Libérer objets inutilisés
+auto wifiConfig = server.getWiFiConfig();
+wifiConfig.useStaticIP = true;
+wifiConfig.staticIP = "192.168.1.100";
+wifiConfig.subnet = "255.255.255.0";
+wifiConfig.gateway = "192.168.1.1";
+wifiConfig.dns1 = "8.8.8.8";
+wifiConfig.dns2 = "8.8.4.4";
 ```
 
-### OTA ne fonctionne pas
+### Custom Logging Levels
 
-**Symptômes**: Upload échoue
-
-**Solutions**:
-1. WiFi stable
-2. Firmware pas trop gros
-3. Partition scheme: `default.csv`
-4. Essayer depuis `/update` direct
-
-## 📚 Documentation Complète
-
-- **README.md**: Vue d'ensemble et démarrage
-- **INTEGRATION_GUIDE.md**: Intégration WiFiManager + MQTT
-- **UTILITIES_README.md**: Guide des 12 utilitaires
-
-## 🎓 Exemples Avancés
-
-### 1. Système complet avec tous les utilitaires
-Voir: `advanced_main.cpp`
-
-### 2. Capteur DHT22 + MQTT
-Voir: `examples.cpp` → `EXAMPLE_DHT22`
-
-### 3. Contrôle de relais
-Voir: `examples.cpp` → `EXAMPLE_RELAY_CONTROL`
-
-### 4. Moniteur système avec alertes
-Voir: `examples.cpp` → `EXAMPLE_SYSTEM_MONITOR`
-
-### 5. Multi-capteurs avec cache
-Voir: `examples.cpp` → `EXAMPLE_MULTI_SENSOR`
-
-### 6. Deep Sleep pour économie batterie
-Voir: `examples.cpp` → `EXAMPLE_DEEP_SLEEP`
-
-## 🚀 Prochaines Étapes
-
-1. **Testez la version de base** (`main.cpp`)
-2. **Configurez WiFi et MQTT** via l'interface web
-3. **Testez les commandes MQTT** depuis un client
-4. **Explorez les exemples** dans `examples.cpp`
-5. **Intégrez les utilitaires** nécessaires
-6. **Personnalisez** selon vos besoins
-
-## 🔒 Sécurité - Points Importants
-
-### En production:
-
-✅ **Changez les identifiants par défaut**
 ```cpp
-WiFiManagerOTA wifiManager(80, "votre_user", "MotDePasseSecurise123!");
+logger.setLevel(logger.DEBUG);  // Show all messages
+logger.setLevel(logger.WARNING);  // Only warnings and above
+logger.setLevel(logger.ERROR);  // Only errors and critical
 ```
 
-✅ **Activez SSL/TLS pour MQTT**
+### Adjusting Reconnection Intervals
+
+Modify in `mqtt.h`:
+
 ```cpp
-secureClient.setCACert(root_ca);
+unsigned long reconnectInterval = 2000;  // Initial: 2 seconds
+// Max interval: 60 seconds (with exponential backoff)
 ```
 
-✅ **Désactivez les logs debug**
-```ini
-# Commentez dans platformio.ini:
-# -D DEBUG_ESP_PORT=Serial
-```
+### Custom Web Pages
 
-✅ **Utilisez des certificats valides**
+You can extend the web interface by adding custom routes in `WiFiManagerOTA.cpp`:
+
 ```cpp
-// Pas de setInsecure() en production
+server.on("/custom", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/html", "<h1>Custom Page</h1>");
+});
 ```
 
-## 📈 Optimisations Performance
+## 🤝 Contributing
 
-### Mémoire
-```cpp
-// Utiliser PROGMEM pour HTML
-const char html[] PROGMEM = "...";
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-// Libérer après scan WiFi
-WiFi.scanDelete();
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-// CircularBuffer limité
-CircularBuffer<String, 10> queue; // Pas 100
-```
+## 📄 License
 
-### Réseau
-```cpp
-// Publier seulement si changement
-if (changeDetector.hasChanged(value)) {
-    publish(value);
-}
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-// Queue MQTT pour retry
-mqttHelper.publishWithRetry(topic, msg);
-```
+## 👤 Author
 
-### CPU
-```cpp
-// TaskScheduler au lieu de delay()
-scheduler.addTask("sensor", 1000, readSensor);
+**traoreera**
+- Email: traoreera@gmail.com
+- GitHub: [@traoreera](https://github.com/traoreera)
 
-// Filtrer les données
-float filtered = lowPassFilter.filter(raw);
-```
+## 🙏 Acknowledgments
 
-## 🎉 Félicitations !
-
-Vous avez maintenant un système ESP32 complet, robuste et professionnel avec:
-
-- ✅ Configuration web intuitive
-- ✅ MQTT fiable avec retry
-- ✅ OTA pour mises à jour
-- ✅ 12 utilitaires puissants
-- ✅ Exemples pratiques
-- ✅ Documentation complète
-
-**Bon développement ! 🚀**
-
----
+- [ESPAsyncWebServer](https://github.com/me-no-dev/ESPAsyncWebServer)
+- [ElegantOTA](https://github.com/ayushsharma82/ElegantOTA)
+- [PubSubClient](https://github.com/knolleary/pubsubclient)
+- ESP32 Arduino Core team
 
 ## 📞 Support
 
-Pour toute question:
-1. Consultez la documentation
-2. Vérifiez les exemples
-3. Examinez les logs série
-4. Testez les commandes de debug
-
-## 📄 Licence
-
-Ce projet est sous licence MIT. Libre d'utilisation, modification et distribution.
+For issues, questions, or suggestions:
+1. Check the [Troubleshooting](#troubleshooting) section
+2. Review existing [GitHub Issues](https://github.com/traoreera/WifiotaMq/issues)
+3. Create a new issue with detailed information
 
 ---
 
-**Créé avec ❤️ pour la communauté ESP32**
+**Made with ❤️ for the ESP32 community**
