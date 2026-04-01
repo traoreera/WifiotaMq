@@ -1,103 +1,95 @@
-
 // ============================================
 // WiFiManagerOTA.cpp
 // ============================================
 #include "WiFiManagerOTA.h"
 #include "WebPages.h"
 #include "utilities.h"
-Logger logs;
 
-/**
- * Constructeur de la classe WiFiManagerOTA.
- *
- * @param port Numéro de port utilisé par le serveur web.
- * @param user Nom d'utilisateur pour l accès OTA.
- * @param pass Mot de passe pour l accès OTA.
+// ✅ Fix: nom unifié — mqtt.h déclare "extern Logger logger"
+extern Logger logger;
 
-
-/**
- * Initialise le gestionnaire WiFiManagerOTA.
- *
- * @param hostname Nom de domaine local pour l'accès mDNS.
- * @param apName Nom du point d accès WiFi.
- * @param apPassword Mot de passe du point d accès WiFi.
- */
-
+// ─────────────────────────────────────────────────────────
 WiFiManagerOTA::WiFiManagerOTA(uint16_t port, const char *user, const char *pass)
-    : server(port), otaUser(user), otaPass(pass), lastReconnectAttempt(0)
+    : server(port), otaUser(user), otaPass(pass)
 {
-    mqtt_config = {.hostname = "", .port = 8883, .user = "", .password = "", .client = ""};
+    mqtt_config = {};
 }
 
-
-
+// ─────────────────────────────────────────────────────────
 void WiFiManagerOTA::begin(String hostname, String apName, String apPassword)
 {
-    logs.info("╔═══════════════════════════════════╗");
-    logs.info("║   WiFiManagerOTA Initialisation   ║");
-    logs.info("╚═══════════════════════════════════╝");
+    logger.info("╔═══════════════════════════════════╗");
+    logger.info("║   WiFiManagerOTA Initialisation   ║");
+    logger.info("╚═══════════════════════════════════╝");
 
     if (!connectToWiFi())
-    {
         startAccessPoint(apName, apPassword);
-    }
 
     setupRoutes();
     ElegantOTA.begin(&server, otaUser.c_str(), otaPass.c_str());
     server.begin();
-
-    logs.info("Serveur web démarré");
+    logger.info("Serveur web démarré");
 
     if (MDNS.begin(hostname.c_str()))
     {
-        logs.info("mDNS actif: http://" + hostname + ".local");
+        logger.info("mDNS actif: http://" + hostname + ".local");
         MDNS.addService("http", "tcp", 80);
     }
 
-    logs.info("Accès:");
-    logs.info("\t\tUser: " + otaUser);
-    logs.info("\t\tPass: " + otaPass);
-    logs.info("═══════════════════════════════════");
+    logger.info("Accès — User: " + otaUser + "  Pass: " + otaPass);
+    logger.info("═══════════════════════════════════");
 }
 
-/**
- * Boucle d'exécution de la classe WiFiManagerOTA.
- *
- * Cette fonction est appelée en boucle pour gérer les événements
- * liés au serveur web et au système d'accès OTA.
- */
+// ─────────────────────────────────────────────────────────
 void WiFiManagerOTA::loop()
 {
     ElegantOTA.loop();
-}
 
-/**
- * Gère la reconnexion WiFi en cas de perte de connexion.
- * Cette fonction est appelée en boucle pour gérer les événements
- * liés au système de connexion WiFi.
- */
-void WiFiManagerOTA::handleWiFiReconnect()
-{
-    if (WiFi.status() != WL_CONNECTED && wifi_connected)
+    // ✅ Fix: redémarrage différé — la réponse HTTP a le temps d'être envoyée
+    if (pendingRestart && millis() >= restartScheduledAt)
     {
-        unsigned long now = millis();
-        if (now - lastReconnectAttempt > 30000)
-        {
-            logs.info("Tentative de reconnexion WiFi...");
-            lastReconnectAttempt = now;
-            connectToWiFi(10, 500);
-        }
+        logger.info("Redémarrage...");
+        ESP.restart();
     }
 }
 
-/**
- * Charge la configuration WiFi enregistrée dans les préférences.
- *
- * Cette fonction charge les paramètres de connexion WiFi (SSID, mot de passe,
- * topic MQTT et user ID) enregistrés dans les préférences du système.
- *
- * Les paramètres sont stockés dans le namespace "wifi_config".
- */
+// ─────────────────────────────────────────────────────────
+void WiFiManagerOTA::scheduleRestart(unsigned long delayMs)
+{
+    pendingRestart = true;
+    restartScheduledAt = millis() + delayMs;
+    logger.info("Redémarrage programmé dans " + String(delayMs) + " ms");
+}
+
+// ─────────────────────────────────────────────────────────
+void WiFiManagerOTA::handleWiFiReconnect()
+{
+    if (!wifi_connected)
+        return;
+    if (WiFi.status() == WL_CONNECTED)
+        return;
+
+    unsigned long now = millis();
+    if (now - lastReconnectAttempt > 30000)
+    {
+        logger.info("Tentative de reconnexion WiFi...");
+        lastReconnectAttempt = now;
+        connectToWiFi(10, 500);
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+bool WiFiManagerOTA::authenticate(AsyncWebServerRequest *request)
+{
+    if (!request->authenticate(otaUser.c_str(), otaPass.c_str()))
+    {
+        request->requestAuthentication();
+        return false;
+    }
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────
 void WiFiManagerOTA::loadConfig()
 {
     prefs.begin("wifi_config", true);
@@ -105,37 +97,19 @@ void WiFiManagerOTA::loadConfig()
     config.password = prefs.getString("password", "");
     config.topic = prefs.getString("topic", "");
     config.user_id = prefs.getString("user_id", "");
-    config.useStaticIP = prefs.getBool("useStaticIP", false);   // Nouveau
-    config.staticIP = prefs.getString("staticIP", "");          // Nouveau
-    config.subnet = prefs.getString("subnet", "255.255.255.0"); // Nouveau (défaut /24)
-    config.gateway = prefs.getString("gateway", "");            // Nouveau
-    config.dns1 = prefs.getString("dns1", "8.8.8.8");           // Nouveau (Google DNS)
-    config.dns2 = prefs.getString("dns2", "8.8.4.4");           // Nouveau (Google DNS secondaire)
+    config.useStaticIP = prefs.getBool("useStaticIP", false);
+    config.staticIP = prefs.getString("staticIP", "");
+    config.subnet = prefs.getString("subnet", "255.255.255.0");
+    config.gateway = prefs.getString("gateway", "");
+    config.dns1 = prefs.getString("dns1", "8.8.8.8");
+    config.dns2 = prefs.getString("dns2", "8.8.4.4");
     prefs.end();
 
-    logs.info("Configuration WiFi chargée:");
-    logs.info("  SSID: " + config.ssid);
-    logs.info("  Topic: " + config.topic);
-    logs.info("  User ID: " + config.user_id);
-    logs.info(String("  IP Statique: ") + (config.useStaticIP ? "Activé" : "Désactivé"));
-    if (config.useStaticIP)
-    {
-        logs.info("  IP: " + config.staticIP);
-        logs.info("  Subnet: " + config.subnet);
-        logs.info("  Gateway: " + config.gateway);
-        logs.info("  DNS1: " + config.dns1);
-        logs.info("  DNS2: " + config.dns2);
-    }
+    logger.info("Config WiFi — SSID: " + config.ssid +
+                "  IP statique: " + String(config.useStaticIP ? "oui" : "non"));
 }
 
-/**
- * Charge la configuration MQTT enregistrée dans les préférences.
- *
- * Cette fonction charge les paramètres de connexion MQTT (hostname, port, utilisateur,
- * mot de passe et client ID) enregistrés dans les préférences du système.
- *
- * Les paramètres sont stockés dans le namespace "mqtt_config".
- */
+// ─────────────────────────────────────────────────────────
 void WiFiManagerOTA::loadMqttConfig()
 {
     prefs.begin("mqtt_config", true);
@@ -147,22 +121,12 @@ void WiFiManagerOTA::loadMqttConfig()
     prefs.end();
 
     if (mqtt_config.port < 1 || mqtt_config.port > 65535)
-    {
         mqtt_config.port = 8883;
-    }
 
-    logs.info("Configuration MQTT chargée:");
-    logs.info("  Hostname: " + mqtt_config.hostname);
-    logs.info("  Port: " + String(mqtt_config.port));
-    logs.info("  Client: " + mqtt_config.client);
+    logger.info("Config MQTT — " + mqtt_config.hostname + ":" + String(mqtt_config.port));
 }
 
-/**
- * Sauvegarde la configuration WiFi actuelle dans les préférences.
- *
- * Cette fonction sauvegarde les paramètres de connexion WiFi (SSID, mot de passe, topic
- * et user ID) actuels dans les préférences du système.
- */
+// ─────────────────────────────────────────────────────────
 void WiFiManagerOTA::saveConfig()
 {
     prefs.begin("wifi_config", false);
@@ -170,21 +134,17 @@ void WiFiManagerOTA::saveConfig()
     prefs.putString("password", config.password);
     prefs.putString("topic", config.topic);
     prefs.putString("user_id", config.user_id);
-    prefs.putBool("useStaticIP", config.useStaticIP); // Nouveau
-    prefs.putString("staticIP", config.staticIP);     // Nouveau
-    prefs.putString("subnet", config.subnet);         // Nouveau
-    prefs.putString("gateway", config.gateway);       // Nouveau
-    prefs.putString("dns1", config.dns1);             // Nouveau
-    prefs.putString("dns2", config.dns2);             // Nouveau
+    prefs.putBool("useStaticIP", config.useStaticIP);
+    prefs.putString("staticIP", config.staticIP);
+    prefs.putString("subnet", config.subnet);
+    prefs.putString("gateway", config.gateway);
+    prefs.putString("dns1", config.dns1);
+    prefs.putString("dns2", config.dns2);
     prefs.end();
-    logs.info("Configuration WiFi sauvegardée");
+    logger.info("Configuration WiFi sauvegardée");
 }
-/**
- * Sauvegarde la configuration MQTT actuelle dans les préférences.
- *
- * Cette fonction sauvegarde les paramètres de connexion MQTT (hostname, port, utilisateur,
- * mot de passe et client ID) actuels dans les préférences du système.
- */
+
+// ─────────────────────────────────────────────────────────
 void WiFiManagerOTA::saveMqttConfig()
 {
     prefs.begin("mqtt_config", false);
@@ -194,222 +154,137 @@ void WiFiManagerOTA::saveMqttConfig()
     prefs.putString("password", mqtt_config.password);
     prefs.putString("client", mqtt_config.client);
     prefs.end();
-    logs.info("Configuration MQTT sauvegardée");
+    logger.info("Configuration MQTT sauvegardée");
 }
 
-/**
- * Efface la configuration WiFi et MQTT actuelle.
- *
- * Cette fonction efface les paramètres de connexion WiFi et MQTT actuels
- * dans les préférences du système.
- */
+// ─────────────────────────────────────────────────────────
 void WiFiManagerOTA::resetConfig()
 {
     prefs.begin("wifi_config", false);
     prefs.clear();
     prefs.end();
-
     prefs.begin("mqtt_config", false);
     prefs.clear();
     prefs.end();
-
-    logs.info("Configuration effacée");
+    logger.info("Configuration effacée");
 }
 
-/**
- * Connexion à un réseau WiFi.
- *
- * Cette fonction charge la configuration WiFi enregistrée dans les préférences
- * et tente de se connecter au réseau WiFi spécifié.
- *
- * @param maxAttempts Nombre de tentatives de connexion maximum.
- * @param delayMs Délai entre chaque tentative de connexion (en ms).
- * @return true si la connexion est réussie, false sinon.
- */
+// ─────────────────────────────────────────────────────────
 bool WiFiManagerOTA::connectToWiFi(int maxAttempts, int delayMs)
 {
     loadConfig();
-    if (config.ssid == "" || config.password == "")
+    if (config.ssid.isEmpty() || config.password.isEmpty())
     {
-        logs.error("Pas de configuration WiFi");
+        logger.error("Pas de configuration WiFi enregistrée");
         return false;
     }
 
     WiFi.mode(WIFI_STA);
-    if (config.useStaticIP && config.staticIP != "" && config.gateway != "")
+
+    if (config.useStaticIP && !config.staticIP.isEmpty() && !config.gateway.isEmpty())
     {
         IPAddress ip, subnet, gateway, dns1, dns2;
         if (ip.fromString(config.staticIP) && subnet.fromString(config.subnet) &&
-            gateway.fromString(config.gateway) && dns1.fromString(config.dns1) && dns2.fromString(config.dns2))
+            gateway.fromString(config.gateway) && dns1.fromString(config.dns1) &&
+            dns2.fromString(config.dns2))
         {
             WiFi.config(ip, gateway, subnet, dns1, dns2);
-            logs.info("Configuration IP statique appliquée");
+            logger.info("IP statique appliquée: " + config.staticIP);
         }
         else
         {
-            logs.error("Adresses IP statiques invalides, utilisation DHCP");
+            logger.error("Adresses IP invalides — fallback DHCP");
         }
     }
-    WiFi.begin(config.ssid.c_str(), config.password.c_str());
-    logs.info("Connexion à " + config.ssid);
 
-    unsigned long startAttempt = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < (maxAttempts * delayMs))
+    WiFi.begin(config.ssid.c_str(), config.password.c_str());
+    logger.info("Connexion à " + config.ssid + " ...");
+
+    unsigned long deadline = millis() + (unsigned long)maxAttempts * delayMs;
+    while (WiFi.status() != WL_CONNECTED && millis() < deadline)
     {
-        logs.info(".");
         delay(delayMs);
+        Serial.print('.');
     }
+    Serial.println();
 
     if (WiFi.status() == WL_CONNECTED)
     {
-        logs.info("Connecté !");
-        logs.info("  IP: " + WiFi.localIP().toString());
-        logs.info("  Signal: " + String(WiFi.RSSI()) + " dBm");
+        logger.info("Connecté ! IP: " + WiFi.localIP().toString() +
+                    "  Signal: " + String(WiFi.RSSI()) + " dBm");
         wifi_connected = true;
         return true;
     }
 
-    logs.critical("Connexion échouée");
+    logger.error("Connexion WiFi échouée");
     wifi_connected = false;
     return false;
 }
-/**
- * Demarrage d'un point d'accès WiFi.
- *
- * Cette fonction demarre un point d'accès WiFi avec le nom et le mot de passe fournis.
- *
- * @param apName Nom du point d'accès WiFi.
- * @param password Mot de passe du point d'accès WiFi.
- */
+
+// ─────────────────────────────────────────────────────────
 void WiFiManagerOTA::startAccessPoint(String apName, String password)
 {
     WiFi.mode(WIFI_AP);
     WiFi.softAP(apName.c_str(), password.c_str());
-    logs.info("Point d'accès démarré");
-    logs.info("  SSID: " + apName);
-    logs.info("  IP: " + WiFi.softAPIP().toString());
-    logs.info("  Mot de passe: " + password);
+    logger.info("Point d'accès — SSID: " + apName +
+                "  IP: " + WiFi.softAPIP().toString());
 }
 
-/**
- * Formatte le temps écoulé depuis le démarrage du système en une chaîne de caractères lisible.
- *
- * La fonction renvoie une chaîne de caractères au format "Xj Yh Zm" ou "Xh Ym Zs" suivant le temps écoulé.
- *
- * @return une chaîne de caractères représentant le temps écoulé.
- */
+// ─────────────────────────────────────────────────────────
 String WiFiManagerOTA::formatUptime()
 {
-    unsigned long seconds = millis() / 1000;
-    unsigned long minutes = seconds / 60;
-    unsigned long hours = minutes / 60;
-    unsigned long days = hours / 24;
+    unsigned long s = millis() / 1000;
+    unsigned long m = s / 60, h = m / 60, d = h / 24;
 
-    if (days > 0)
-        return String(days) + "j " + String(hours % 24) + "h";
-    if (hours > 0)
-        return String(hours) + "h " + String(minutes % 60) + "m";
-    if (minutes > 0)
-        return String(minutes) + "m " + String(seconds % 60) + "s";
-    return String(seconds) + "s";
+    if (d > 0)
+        return String(d) + "j " + String(h % 24) + "h";
+    if (h > 0)
+        return String(h) + "h " + String(m % 60) + "m";
+    if (m > 0)
+        return String(m) + "m " + String(s % 60) + "s";
+    return String(s) + "s";
 }
 
-/**
- * Génère le topic de publication pour une version de firmware.
- *
- * @param version Version de firmware (par exemple "v1.0.0").
- * @return Le topic de publication complet (par exemple "home/sensor/v1.0.0/device001").
- */
+// ─────────────────────────────────────────────────────────
 String WiFiManagerOTA::pubTopic(String version)
 {
-    String full = config.topic + version + config.user_id;
-    logs.info("Topic publication: " + full);
-    return full;
+    return config.topic + version + config.user_id;
 }
 
-/**
- * Génère le topic de commande pour une version de firmware.
- *
- * @param version Version de firmware (par exemple "v1.0.0").
- * @param cmd Commande à envoyer (par exemple "restart").
- * @return Le topic de commande complet (par exemple "home/sensor/v1.0.0/device001/restart").
- */
 String WiFiManagerOTA::cmdTopic(String version, String cmd)
 {
-    String full = config.topic + version + config.user_id + cmd;
-    logs.info("Topic commande: " + full);
-    return full;
+    return config.topic + version + config.user_id + cmd;
 }
 
-/**
- * Charge la configuration MQTT enregistrée dans les préférences.
- *
- * Cette fonction charge les paramètres de connexion MQTT (hostname, port, utilisateur,
- * mot de passe et client ID) enregistrés dans les préférences du système.
- *
- * Les paramètres sont stockés dans le namespace "mqtt_config".
- *
- * @return La configuration MQTT actuelle.
- */
+// ─────────────────────────────────────────────────────────
 WiFiManagerOTA::MQTTConfig WiFiManagerOTA::getMqttConfig()
 {
     loadMqttConfig();
     return mqtt_config;
 }
 
-/**
- * Récupère la configuration WiFi actuelle.
- *
- * Cette fonction charge la configuration WiFi actuelle enregistrée dans les préférences
- * et la renvoie sous la forme d'une structure WiFiConfigStruct.
- *
- * @return La configuration WiFi actuelle.
- */
 WiFiManagerOTA::WiFiConfigStruct WiFiManagerOTA::getWiFiConfig()
 {
     loadConfig();
-    WiFiConfigStruct wifi;
-    wifi.ssid = config.ssid;
-    wifi.password = config.password;
-    wifi.useStaticIP = config.useStaticIP;
-    wifi.staticIP = config.staticIP;
-    wifi.subnet = config.subnet;
-    wifi.gateway = config.gateway;
-    wifi.dns1 = config.dns1;
-    wifi.dns2 = config.dns2;
-    return wifi;
+    return {config.ssid, config.password, config.useStaticIP,
+            config.staticIP, config.subnet, config.gateway,
+            config.dns1, config.dns2};
 }
 
-/**
- * Vérifie si la configuration MQTT actuelle est valide.
- *
- * Une configuration MQTT est considérée comme valide si elle contient un hostname, un client ID
- * et un port non vides.
- *
- * @return true si la configuration MQTT actuelle est valide, false sinon.
- */
 bool WiFiManagerOTA::hasValidConfig()
 {
     MQTTConfig cfg = getMqttConfig();
-    return (cfg.hostname.length() > 0 && cfg.client.length() > 0 && cfg.port > 0);
+    return cfg.hostname.length() > 0 && cfg.client.length() > 0 && cfg.port > 0;
 }
 
-/**
- * Gère la page de configuration WiFi.
- *
- * Cette fonction est appelée lorsque l'utilisateur accède à la page de configuration WiFi.
- * Elle scanne les réseaux WiFi disponibles et génère une page HTML avec les paramètres actuels.
- *
- * @param request La requête HTTP reçue.
- */
+// ─────────────────────────────────────────────────────────
 void WiFiManagerOTA::handleConfigPage(AsyncWebServerRequest *request)
 {
     String html = String(WebPages::CONFIG_HTML);
 
+    // Scanner les réseaux
     int n = WiFi.scanNetworks();
-    String networks = "";
-    String currentSSID = config.ssid;
-
+    String networks;
     if (n == 0)
     {
         networks = "<option value=''>Aucun réseau trouvé</option>";
@@ -420,190 +295,161 @@ void WiFiManagerOTA::handleConfigPage(AsyncWebServerRequest *request)
         {
             String ssid = WiFi.SSID(i);
             networks += "<option value='" + ssid + "'";
-            if (ssid == currentSSID)
+            if (ssid == config.ssid)
                 networks += " selected";
             networks += ">" + ssid + " (" + String(WiFi.RSSI(i)) + " dBm)";
-            networks += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? " 🔓" : " 🔒");
+            networks += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? " [ouvert]" : " [chiffré]");
             networks += "</option>";
         }
     }
 
+    // ✅ Fix: plus de bloc dupliqué
     html.replace("%NETWORKS%", networks);
     html.replace("%PASSWORD%", config.password);
     html.replace("%TOPIC%", config.topic);
     html.replace("%USER_ID%", config.user_id);
-    html.replace("%NETWORKS%", networks);
-    html.replace("%PASSWORD%", config.password);
-    html.replace("%TOPIC%", config.topic);
-    html.replace("%USER_ID%", config.user_id);
-    html.replace("%USE_STATIC_IP%", config.useStaticIP ? "checked" : ""); // Nouveau
-    html.replace("%STATIC_IP%", config.staticIP);                         // Nouveau
-    html.replace("%SUBNET%", config.subnet);                              // Nouveau
-    html.replace("%GATEWAY%", config.gateway);                            // Nouveau
-    html.replace("%DNS1%", config.dns1);                                  // Nouveau
-    html.replace("%DNS2%", config.dns2);                                  // Nouveau
+    html.replace("%USE_STATIC_IP%", config.useStaticIP ? "checked" : "");
+    html.replace("%STATIC_IP%", config.staticIP);
+    html.replace("%SUBNET%", config.subnet);
+    html.replace("%GATEWAY%", config.gateway);
+    html.replace("%DNS1%", config.dns1);
+    html.replace("%DNS2%", config.dns2);
 
     request->send(200, "text/html", html);
     WiFi.scanDelete();
 }
 
-/**
- * Configure les routes de l'API OTA.
- *
- * Cette fonction configure les différentes routes de l'API OTA, notamment pour
- * la page d'accueil, la page de configuration WiFi, la page de configuration MQTT,
- * la page de status et la page de reboot.
- */
+// ─────────────────────────────────────────────────────────
 void WiFiManagerOTA::setupRoutes()
 {
-    // Home page
+    // ── CSS partagé (mis en cache 24h) ───────────────────
+    server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request)
+              {
+        AsyncWebServerResponse* resp = request->beginResponse_P(
+            200, "text/css", WebPages::COMMON_CSS);
+        resp->addHeader("Cache-Control", "public, max-age=86400");
+        request->send(resp); });
+
+    // ── Accueil ──────────────────────────────────────────
     server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request)
               {
-    if (!request->authenticate(otaUser.c_str(), otaPass.c_str())) {
-        return request->requestAuthentication();
-    }
-    
-    String page = String(WebPages::INDEX_HTML);
-    page.replace("%SSID%", WiFi.isConnected() ? config.ssid : "Non connecté");
-    page.replace("%IP%", WiFi.isConnected() ? WiFi.localIP().toString() : WiFi.softAPIP().toString());
-    page.replace("%RSSI%", WiFi.isConnected() ? String(WiFi.RSSI()) : "N/A");
-    page.replace("%UPTIME%", formatUptime());
-    
-    request->send(200, "text/html", page); });
+        if (!authenticate(request)) return;
 
-    // WiFi config page
+        String page = String(WebPages::INDEX_HTML);
+        page.replace("%SSID%",   WiFi.isConnected() ? config.ssid : "Non connecté");
+        page.replace("%IP%",     WiFi.isConnected() ? WiFi.localIP().toString()
+                                                     : WiFi.softAPIP().toString());
+        page.replace("%RSSI%",   WiFi.isConnected() ? String(WiFi.RSSI()) : "N/A");
+        page.replace("%UPTIME%", formatUptime());
+        request->send(200, "text/html", page); });
+
+    // ── Config WiFi ──────────────────────────────────────
     server.on("/config", HTTP_GET, [this](AsyncWebServerRequest *request)
               {
-    if (!request->authenticate(otaUser.c_str(), otaPass.c_str())) {
-      return request->requestAuthentication();
-    }
-    handleConfigPage(request); });
+        if (!authenticate(request)) return;
+        handleConfigPage(request); });
 
-    // Save WiFi config
     server.on("/save", HTTP_POST, [this](AsyncWebServerRequest *request)
               {
-    if (!request->authenticate(otaUser.c_str(), otaPass.c_str())) {
-      return request->requestAuthentication();
-    }
-    
-    if (request->hasParam("ssid", true) && request->hasParam("password", true)) {
-        config.ssid = request->getParam("ssid", true)->value();
-        config.password = request->getParam("password", true)->value();
-        config.topic = request->getParam("topic", true)->value();
-        config.user_id = request->getParam("user_id", true)->value();
-        config.useStaticIP = request->hasParam("useStaticIP", true);  // Nouveau : case cochée ?
-        config.staticIP = request->getParam("staticIP", true)->value();  // Nouveau
-        config.subnet = request->getParam("subnet", true)->value();      // Nouveau
-        config.gateway = request->getParam("gateway", true)->value();    // Nouveau
-        config.dns1 = request->getParam("dns1", true)->value();          // Nouveau
-        config.dns2 = request->getParam("dns2", true)->value();          // Nouveau
-        saveConfig();
-      
-      request->send(200, "text/html", 
-        "<!DOCTYPE html><html><head><meta http-equiv='refresh' content='3;url=/'>"
-        "<meta charset='UTF-8'></head><body style='font-family:Arial;text-align:center;padding:50px;'>"
-        "<h2>✅ Configuration enregistrée</h2><p>Redémarrage dans 3 secondes...</p></body></html>");
-      
-      delay(1000);
-      ESP.restart();
-    } else {
-      request->send(400, "text/plain", "⚠️ Paramètres manquants");
-    } });
+        if (!authenticate(request)) return;
 
-    // MQTT config page
+        if (!request->hasParam("ssid", true) || !request->hasParam("password", true))
+        {
+            request->send(400, "text/plain", "Paramètres manquants");
+            return;
+        }
+
+        config.ssid        = request->getParam("ssid",        true)->value();
+        config.password    = request->getParam("password",    true)->value();
+        config.topic       = request->getParam("topic",       true)->value();
+        config.user_id     = request->getParam("user_id",     true)->value();
+        config.useStaticIP = request->hasParam("useStaticIP", true);
+        config.staticIP    = request->getParam("staticIP",    true)->value();
+        config.subnet      = request->getParam("subnet",      true)->value();
+        config.gateway     = request->getParam("gateway",     true)->value();
+        config.dns1        = request->getParam("dns1",        true)->value();
+        config.dns2        = request->getParam("dns2",        true)->value();
+        saveConfig();
+
+        // ✅ Fix: réponse d'abord, redémarrage après
+        request->send(200, "text/html",
+            WebPages::successPage("Configuration WiFi enregistrée"));
+        scheduleRestart(); });
+
+    // ── Config MQTT ──────────────────────────────────────
     server.on("/mqtt", HTTP_GET, [this](AsyncWebServerRequest *request)
               {
-    if (!request->authenticate(otaUser.c_str(), otaPass.c_str())) {
-      return request->requestAuthentication();
-    }
-    request->send(200, "text/html", WebPages::MQTT_CONFIG_HTML); });
+        if (!authenticate(request)) return;
 
-    // Save MQTT config
+        // ✅ Fix: pré-remplissage des valeurs MQTT existantes
+        loadMqttConfig();
+        String html = String(WebPages::MQTT_CONFIG_HTML);
+        html.replace("%HOSTNAME%",   mqtt_config.hostname);
+        html.replace("%PORT%",       String(mqtt_config.port));
+        html.replace("%MQTT_USER%",  mqtt_config.user);
+        html.replace("%MQTT_CLIENT%",mqtt_config.client);
+        request->send(200, "text/html", html); });
+
     server.on("/saveMqtt", HTTP_POST, [this](AsyncWebServerRequest *request)
               {
-    if (!request->authenticate(otaUser.c_str(), otaPass.c_str())) {
-      return request->requestAuthentication();
-    }
-    
-    if (request->hasParam("hostname", true) && request->hasParam("port", true) &&
-        request->hasParam("user", true) && request->hasParam("password", true) &&
-        request->hasParam("client", true)) {
-      
-      mqtt_config.hostname = request->getParam("hostname", true)->value();
-      mqtt_config.port = request->getParam("port", true)->value().toInt();
-      mqtt_config.user = request->getParam("user", true)->value();
-      mqtt_config.password = request->getParam("password", true)->value();
-      mqtt_config.client = request->getParam("client", true)->value();
-      saveMqttConfig();
-      
-      request->send(200, "text/html",
-        "<!DOCTYPE html><html><head><meta http-equiv='refresh' content='3;url=/'>"
-        "<meta charset='UTF-8'></head><body style='font-family:Arial;text-align:center;padding:50px;'>"
-        "<h2>✅ Configuration MQTT enregistrée</h2><p>Redémarrage dans 3 secondes...</p></body></html>");
-      
-      delay(1000);
-      ESP.restart();
-    } else {
-      request->send(400, "text/plain", "⚠️ Paramètres manquants");
-    } });
+        if (!authenticate(request)) return;
 
-    // Status page
+        if (!request->hasParam("hostname", true) || !request->hasParam("port", true) ||
+            !request->hasParam("user",     true) || !request->hasParam("password", true) ||
+            !request->hasParam("client",   true))
+        {
+            request->send(400, "text/plain", "Paramètres manquants");
+            return;
+        }
+
+        mqtt_config.hostname = request->getParam("hostname", true)->value();
+        mqtt_config.port     = request->getParam("port",     true)->value().toInt();
+        mqtt_config.user     = request->getParam("user",     true)->value();
+        mqtt_config.password = request->getParam("password", true)->value();
+        mqtt_config.client   = request->getParam("client",   true)->value();
+        saveMqttConfig();
+
+        request->send(200, "text/html",
+            WebPages::successPage("Configuration MQTT enregistrée"));
+        scheduleRestart(); });
+
+    // ── Status JSON ──────────────────────────────────────
     server.on("/status", HTTP_GET, [this](AsyncWebServerRequest *request)
               {
-    if (!request->authenticate(otaUser.c_str(), otaPass.c_str())) {
-      return request->requestAuthentication();
-    }
-    
-    String json = "{";
-    json += "\"ssid\":\"" + String(WiFi.SSID()) + "\",";
-    json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
-    json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
-    json += "\"uptime\":\"" + formatUptime() + "\",";
-    json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
-    json += "\"chipModel\":\"" + String(ESP.getChipModel()) + "\",";
-    json += "\"cpuFreq\":" + String(ESP.getCpuFreqMHz());
-    json += "}";
-    
-    request->send(200, "application/json", json); });
+        if (!authenticate(request)) return;
 
-    // Reset config
+        String json = "{";
+        json += "\"ssid\":\""      + String(WiFi.SSID())             + "\",";
+        json += "\"ip\":\""        + WiFi.localIP().toString()        + "\",";
+        json += "\"rssi\":"        + String(WiFi.RSSI())              + ",";
+        json += "\"uptime\":\""    + formatUptime()                   + "\",";
+        json += "\"freeHeap\":"    + String(ESP.getFreeHeap())        + ",";
+        json += "\"chipModel\":\"" + String(ESP.getChipModel())       + "\",";
+        json += "\"cpuFreq\":"     + String(ESP.getCpuFreqMHz())      + ",";
+        json += "\"mqttHost\":\"" + mqtt_config.hostname              + "\"";
+        json += "}";
+        request->send(200, "application/json", json); });
+
+    // ── Reset ────────────────────────────────────────────
     server.on("/reset", HTTP_GET, [this](AsyncWebServerRequest *request)
               {
-    if (!request->authenticate(otaUser.c_str(), otaPass.c_str())) {
-      return request->requestAuthentication();
-    }
-    
-    resetConfig();
-    request->send(200, "text/html",
-        "<!DOCTYPE html><html><head><meta charset='UTF-8'></head>"
-        "<body style='font-family:Arial;text-align:center;padding:50px;'>"
-        "<h2>⚠️ Configuration effacée</h2><p>Redémarrage...</p></body></html>");
-    
-    delay(1000);
-    ESP.restart(); });
+        if (!authenticate(request)) return;
+        resetConfig();
+        request->send(200, "text/html",
+            WebPages::successPage("Configuration effacée"));
+        scheduleRestart(); });
 
-    // Reboot
+    // ── Reboot ───────────────────────────────────────────
     server.on("/reboot", HTTP_GET, [this](AsyncWebServerRequest *request)
               {
-    if (!request->authenticate(otaUser.c_str(), otaPass.c_str())) {
-        return request->requestAuthentication();
-    }
-    
-    request->send(200, "text/html",
-        "<!DOCTYPE html><html><head><meta charset='UTF-8'></head>"
-        "<body style='font-family:Arial;text-align:center;padding:50px;'>"
-        "<h2>🔄 Redémarrage en cours...</h2></body></html>");
-    
-    delay(1000);
-    ESP.restart(); });
+        if (!authenticate(request)) return;
+        request->send(200, "text/html",
+            WebPages::successPage("Redémarrage en cours…"));
+        scheduleRestart(); });
 }
 
-/**
- * Active ou désactive le logger des événements.
- *
- * @param active True pour activer le logger, false pour le désactiver.
- */
+// ─────────────────────────────────────────────────────────
 void WiFiManagerOTA::setLogger(bool active)
 {
-    logs.setLogger(active);
+    logger.setLogger(active);
 }

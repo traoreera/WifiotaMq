@@ -3,32 +3,27 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include "WiFiManagerOTA.h"
+#include <Preferences.h> // ✅ Fix: include explicite
+#include <functional>    // ✅ Fix: pour std::function dans TaskScheduler
 #include <cfloat>
-// ═══════════════════════════════════════════════════════════
-// GESTIONNAIRE DE BUFFER CIRCULAIRE pour logs
-// ═══════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════
+// BUFFER CIRCULAIRE
+// ═══════════════════════════════════════════════════════════
 template <typename T, size_t SIZE>
 class CircularBuffer
 {
 private:
     T buffer[SIZE];
-    size_t head = 0;
-    size_t tail = 0;
-    size_t count = 0;
+    size_t head = 0, tail = 0, count = 0;
 
 public:
     bool push(const T &item)
     {
         if (count >= SIZE)
-        {
             tail = (tail + 1) % SIZE;
-        }
         else
-        {
             count++;
-        }
         buffer[head] = item;
         head = (head + 1) % SIZE;
         return true;
@@ -44,89 +39,111 @@ public:
         return true;
     }
 
+    T &operator[](size_t i) { return buffer[(tail + i) % SIZE]; }
     size_t size() const { return count; }
     bool isEmpty() const { return count == 0; }
     bool isFull() const { return count >= SIZE; }
     void clear() { head = tail = count = 0; }
-
-    T &operator[](size_t index)
-    {
-        return buffer[(tail + index) % SIZE];
-    }
 };
 
 // ═══════════════════════════════════════════════════════════
-// GESTIONNAIRE DE STATISTIQUES
+// LOGGER  (instance partagée définie dans WiFiManagerOTA.cpp)
 // ═══════════════════════════════════════════════════════════
+class Logger
+{
+public:
+    enum Level
+    {
+        DEBUG,
+        INFO,
+        WARNING,
+        ERROR,
+        CRITICAL
+    };
 
+    bool isEnabled_logger = true;
+
+    void setLogger(bool active) { isEnabled_logger = active; }
+    void setLevel(Level l) { currentLevel = l; }
+
+    void log(Level level, const String &message)
+    {
+        if (!isEnabled_logger || level < currentLevel)
+            return;
+        const char *prefix[] = {"[DEBUG] ", "[INFO]  ", "[WARN]  ", "[ERROR] ", "[CRIT]  "};
+        Serial.println(String(prefix[level]) + message);
+    }
+
+    void debug(const String &m) { log(DEBUG, m); }
+    void info(const String &m) { log(INFO, m); }
+    void warning(const String &m) { log(WARNING, m); }
+    void error(const String &m) { log(ERROR, m); }
+    void critical(const String &m) { log(CRITICAL, m); }
+
+private:
+    Level currentLevel = INFO;
+};
+
+// ═══════════════════════════════════════════════════════════
+// STATISTIQUES
+// ═══════════════════════════════════════════════════════════
 class Statistics
 {
 private:
-    float min_val = FLT_MAX;
-    float max_val = -FLT_MAX;
-    float sum = 0;
-    float sumSquared = 0;
+    float min_val = FLT_MAX, max_val = -FLT_MAX;
+    float sum = 0, sumSquared = 0;
     uint32_t count = 0;
 
 public:
-    void addValue(float value)
+    void addValue(float v)
     {
-        if (value < min_val)
-            min_val = value;
-        if (value > max_val)
-            max_val = value;
-        sum += value;
-        sumSquared += value * value;
+        if (v < min_val)
+            min_val = v;
+        if (v > max_val)
+            max_val = v;
+        sum += v;
+        sumSquared += v * v;
         count++;
     }
 
     float getMin() const { return count > 0 ? min_val : 0; }
     float getMax() const { return count > 0 ? max_val : 0; }
     float getAverage() const { return count > 0 ? sum / count : 0; }
-
     float getStdDev() const
     {
         if (count < 2)
             return 0;
         float avg = getAverage();
-        return sqrt((sumSquared / count) - (avg * avg));
+        return sqrtf((sumSquared / count) - (avg * avg));
     }
-
     uint32_t getCount() const { return count; }
-
     void reset()
     {
         min_val = FLT_MAX;
         max_val = -FLT_MAX;
-        sum = 0;
-        sumSquared = 0;
+        sum = sumSquared = 0;
         count = 0;
     }
 
     String toJSON() const
     {
-        String json = "{";
-        json += "\"min\":" + String(getMin(), 2) + ",";
-        json += "\"max\":" + String(getMax(), 2) + ",";
-        json += "\"avg\":" + String(getAverage(), 2) + ",";
-        json += "\"stddev\":" + String(getStdDev(), 2) + ",";
-        json += "\"count\":" + String(count);
-        json += "}";
-        return json;
+        return "{\"min\":" + String(getMin(), 2) +
+               ",\"max\":" + String(getMax(), 2) +
+               ",\"avg\":" + String(getAverage(), 2) +
+               ",\"stddev\":" + String(getStdDev(), 2) +
+               ",\"count\":" + String(count) + "}";
     }
 };
 
 // ═══════════════════════════════════════════════════════════
 // WATCHDOG LOGICIEL
 // ═══════════════════════════════════════════════════════════
-
 class SoftwareWatchdog
 {
 private:
-    unsigned long timeout;
-    unsigned long lastFeed;
-    bool enabled = false;
     String name;
+    unsigned long timeout, lastFeed;
+    bool enabled = false;
 
 public:
     SoftwareWatchdog(const String &name, unsigned long timeoutMs = 60000)
@@ -136,49 +153,29 @@ public:
     {
         enabled = true;
         lastFeed = millis();
-        Serial.println("🐕 Watchdog '" + name + "' activé (" + String(timeout) + "ms)");
     }
+    void disable() { enabled = false; }
+    void feed() { lastFeed = millis(); }
 
-    void disable()
-    {
-        enabled = false;
-        Serial.println("🐕 Watchdog '" + name + "' désactivé");
-    }
+    bool hasExpired() const { return enabled && (millis() - lastFeed) > timeout; }
 
-    void feed()
-    {
-        lastFeed = millis();
-    }
-
-    bool hasExpired()
-    {
-        if (!enabled)
-            return false;
-        return (millis() - lastFeed) > timeout;
-    }
-
+    // ✅ Fix: utilise Serial directement (pas de dépendance circulaire)
     void check()
     {
-        if (hasExpired())
-        {
-            Serial.println("💥 WATCHDOG TIMEOUT: " + name);
-            Serial.println("   Dernier feed il y a " + String((millis() - lastFeed) / 1000) + "s");
-            Serial.println("   Redémarrage...");
-            delay(1000);
-            ESP.restart();
-        }
+        if (!hasExpired())
+            return;
+        Serial.printf("[WATCHDOG] TIMEOUT '%s' — dernier feed il y a %lus\n",
+                      name.c_str(), (millis() - lastFeed) / 1000UL);
+        delay(500);
+        ESP.restart();
     }
 
-    unsigned long getTimeSinceLastFeed()
-    {
-        return millis() - lastFeed;
-    }
+    unsigned long timeSinceLastFeed() const { return millis() - lastFeed; }
 };
 
 // ═══════════════════════════════════════════════════════════
-// GESTIONNAIRE DE TÂCHES PÉRIODIQUES
+// TASK SCHEDULER  — supporte lambdas et méthodes membres
 // ═══════════════════════════════════════════════════════════
-
 class TaskScheduler
 {
 private:
@@ -187,25 +184,26 @@ private:
         String name;
         unsigned long interval;
         unsigned long lastRun;
-        void (*callback)();
-        bool enabled;
+        std::function<void()> callback; // ✅ Fix: accepte lambdas
+        bool enabled = true;
     };
 
-    static const int MAX_TASKS = 10;
+    static constexpr int MAX_TASKS = 10;
     Task tasks[MAX_TASKS];
     int taskCount = 0;
 
 public:
-    bool addTask(const String &name, unsigned long intervalMs, void (*callback)())
+    // Accepte lambdas : scheduler.addTask("lire", 5000, [&]{ capteur.lire(); });
+    bool addTask(const String &name, unsigned long intervalMs,
+                 std::function<void()> cb)
     {
         if (taskCount >= MAX_TASKS)
         {
-            Serial.println("Trop de tâches");
+            Serial.println("[Scheduler] Trop de tâches (max " + String(MAX_TASKS) + ")");
             return false;
         }
-        tasks[taskCount] = {name, intervalMs, millis(), callback, true};
-        taskCount++;
-        Serial.println("Tâche ajoutée: " + name + " (" + String(intervalMs) + "ms)");
+        tasks[taskCount++] = {name, intervalMs, millis(), cb, true};
+        Serial.println("[Scheduler] Tâche '" + name + "' ajoutée (" + String(intervalMs) + " ms)");
         return true;
     }
 
@@ -224,141 +222,142 @@ public:
         }
     }
 
+    void enable(const String &name) { setEnabled(name, true); }
+    void disable(const String &name) { setEnabled(name, false); }
+
     void setInterval(const String &name, unsigned long newInterval)
     {
         for (int i = 0; i < taskCount; i++)
-        {
             if (tasks[i].name == name)
             {
                 tasks[i].interval = newInterval;
-                Serial.println("Intervalle modifié: " + name + " -> " + String(newInterval) + "ms");
                 return;
             }
-        }
+    }
+
+private:
+    void setEnabled(const String &name, bool state)
+    {
+        for (int i = 0; i < taskCount; i++)
+            if (tasks[i].name == name)
+            {
+                tasks[i].enabled = state;
+                return;
+            }
     }
 };
-// ═══════════════════════════════════════════════════════════
-// GESTIONNAIRE DE CONFIGURATION JSON
-// ═══════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════
+// CONFIG MANAGER
+// ═══════════════════════════════════════════════════════════
 class ConfigManager
 {
 private:
     Preferences prefs;
-    String namespace_name;
+    String ns;
 
 public:
-    ConfigManager(const String &ns = "app_config") : namespace_name(ns) {}
+    explicit ConfigManager(const String &ns = "app_config") : ns(ns) {}
 
-    bool saveString(const String &key, const String &value)
+    bool saveString(const String &k, const String &v)
     {
-        prefs.begin(namespace_name.c_str(), false);
-        bool result = prefs.putString(key.c_str(), value);
+        prefs.begin(ns.c_str(), false);
+        bool r = prefs.putString(k.c_str(), v);
         prefs.end();
-        return result;
+        return r;
     }
-
-    String loadString(const String &key, const String &defaultValue = "")
+    String loadString(const String &k, const String &def = "")
     {
-        prefs.begin(namespace_name.c_str(), true);
-        String value = prefs.getString(key.c_str(), defaultValue);
+        prefs.begin(ns.c_str(), true);
+        String v = prefs.getString(k.c_str(), def);
         prefs.end();
-        return value;
+        return v;
     }
-
-    bool saveInt(const String &key, int value)
+    bool saveInt(const String &k, int v)
     {
-        prefs.begin(namespace_name.c_str(), false);
-        bool result = prefs.putInt(key.c_str(), value);
+        prefs.begin(ns.c_str(), false);
+        bool r = prefs.putInt(k.c_str(), v);
         prefs.end();
-        return result;
+        return r;
     }
-
-    int loadInt(const String &key, int defaultValue = 0)
+    int loadInt(const String &k, int def = 0)
     {
-        prefs.begin(namespace_name.c_str(), true);
-        int value = prefs.getInt(key.c_str(), defaultValue);
+        prefs.begin(ns.c_str(), true);
+        int v = prefs.getInt(k.c_str(), def);
         prefs.end();
-        return value;
+        return v;
     }
-
-    bool saveFloat(const String &key, float value)
+    bool saveFloat(const String &k, float v)
     {
-        prefs.begin(namespace_name.c_str(), false);
-        bool result = prefs.putFloat(key.c_str(), value);
+        prefs.begin(ns.c_str(), false);
+        bool r = prefs.putFloat(k.c_str(), v);
         prefs.end();
-        return result;
+        return r;
     }
-
-    float loadFloat(const String &key, float defaultValue = 0.0)
+    float loadFloat(const String &k, float def = 0.f)
     {
-        prefs.begin(namespace_name.c_str(), true);
-        float value = prefs.getFloat(key.c_str(), defaultValue);
+        prefs.begin(ns.c_str(), true);
+        float v = prefs.getFloat(k.c_str(), def);
         prefs.end();
-        return value;
+        return v;
     }
-
-    bool saveBool(const String &key, bool value)
+    bool saveBool(const String &k, bool v)
     {
-        prefs.begin(namespace_name.c_str(), false);
-        bool result = prefs.putBool(key.c_str(), value);
+        prefs.begin(ns.c_str(), false);
+        bool r = prefs.putBool(k.c_str(), v);
         prefs.end();
-        return result;
+        return r;
     }
-
-    bool loadBool(const String &key, bool defaultValue = false)
+    bool loadBool(const String &k, bool def = false)
     {
-        prefs.begin(namespace_name.c_str(), true);
-        bool value = prefs.getBool(key.c_str(), defaultValue);
+        prefs.begin(ns.c_str(), true);
+        bool v = prefs.getBool(k.c_str(), def);
         prefs.end();
-        return value;
+        return v;
     }
 
     void clear()
     {
-        prefs.begin(namespace_name.c_str(), false);
+        prefs.begin(ns.c_str(), false);
         prefs.clear();
         prefs.end();
-        Serial.println("🗑️ Configuration '" + namespace_name + "' effacée");
+        Serial.println("[ConfigManager] Namespace '" + ns + "' effacé");
     }
 };
 
 // ═══════════════════════════════════════════════════════════
-// FILTRE PASSE-BAS (pour lisser les lectures de capteurs)
+// FILTRE PASSE-BAS
 // ═══════════════════════════════════════════════════════════
-
 class LowPassFilter
 {
 private:
     float alpha;
-    float filteredValue;
+    float filtered = 0;
     bool initialized = false;
 
 public:
-    LowPassFilter(float smoothingFactor = 0.1) : alpha(smoothingFactor) {}
+    explicit LowPassFilter(float alpha = 0.1f) : alpha(constrain(alpha, 0.f, 1.f)) {}
 
-    float filter(float newValue)
+    float filter(float v)
     {
         if (!initialized)
         {
-            filteredValue = newValue;
+            filtered = v;
             initialized = true;
-            return filteredValue;
+            return v;
         }
-
-        filteredValue = alpha * newValue + (1.0 - alpha) * filteredValue;
-        return filteredValue;
+        filtered = alpha * v + (1.f - alpha) * filtered;
+        return filtered;
     }
 
-    float getValue() const { return filteredValue; }
+    float getValue() const { return filtered; }
     void reset() { initialized = false; }
-    void setSmoothingFactor(float factor) { alpha = constrain(factor, 0.0, 1.0); }
+    void setSmoothingFactor(float a) { alpha = constrain(a, 0.f, 1.f); }
 };
 
 // ═══════════════════════════════════════════════════════════
-// DÉTECTEUR DE CHANGEMENT avec hystérésis
+// DÉTECTEUR DE CHANGEMENT (avec hystérésis)
 // ═══════════════════════════════════════════════════════════
-
 class ChangeDetector
 {
 private:
@@ -367,21 +366,20 @@ private:
     bool firstReading = true;
 
 public:
-    ChangeDetector(float changeThreshold = 1.0)
-        : threshold(changeThreshold), lastValue(0) {}
+    explicit ChangeDetector(float threshold = 1.f)
+        : threshold(threshold), lastValue(0) {}
 
-    bool hasChanged(float newValue)
+    bool hasChanged(float v)
     {
         if (firstReading)
         {
-            lastValue = newValue;
+            lastValue = v;
             firstReading = false;
             return true;
         }
-
-        if (abs(newValue - lastValue) >= threshold)
+        if (fabsf(v - lastValue) >= threshold)
         {
-            lastValue = newValue;
+            lastValue = v;
             return true;
         }
         return false;
@@ -389,20 +387,15 @@ public:
 
     float getLastValue() const { return lastValue; }
     void reset() { firstReading = true; }
-    void setThreshold(float newThreshold) { threshold = newThreshold; }
+    void setThreshold(float t) { threshold = t; }
 };
 
 // ═══════════════════════════════════════════════════════════
-// GESTIONNAIRE DE LED avec patterns
+// LED MANAGER  — corrigé pour ESP32 (ledc au lieu d'analogWrite)
 // ═══════════════════════════════════════════════════════════
-
 class LEDManager
 {
-private:
-    int pin;
-    unsigned long lastToggle = 0;
-    bool state = false;
-
+public:
     enum Pattern
     {
         OFF,
@@ -413,53 +406,66 @@ private:
         HEARTBEAT
     };
 
-    Pattern currentPattern = OFF;
-    unsigned long patternStartTime = 0;
+private:
+    int pin;
+    int ledcChannel; // canal LEDC pour PWM
+    bool state = false;
+    unsigned long lastToggle = 0;
+    Pattern current = OFF;
+    unsigned long patternStart = 0;
 
 public:
-    LEDManager(int ledPin) : pin(ledPin)
+    // ✅ Fix: ledcChannel requis pour PULSE sur ESP32
+    LEDManager(int ledPin, int ledcCh = 0) : pin(ledPin), ledcChannel(ledcCh)
     {
-        pinMode(pin, OUTPUT);
-        digitalWrite(pin, LOW);
+        // LEDC : résolution 8 bits, 1 kHz
+        ledcSetup(ledcChannel, 1000, 8);
+        ledcAttachPin(pin, ledcChannel);
+        ledcWrite(ledcChannel, 0);
     }
 
-    void setPattern(const String &pattern)
+    void setPattern(Pattern p)
     {
-        if (pattern == "off")
-            currentPattern = OFF;
-        else if (pattern == "on")
-            currentPattern = ON;
-        else if (pattern == "blink_slow")
-            currentPattern = BLINK_SLOW;
-        else if (pattern == "blink_fast")
-            currentPattern = BLINK_FAST;
-        else if (pattern == "pulse")
-            currentPattern = PULSE;
-        else if (pattern == "heartbeat")
-            currentPattern = HEARTBEAT;
+        current = p;
+        patternStart = millis();
+        if (p == OFF)
+            ledcWrite(ledcChannel, 0);
+        if (p == ON)
+            ledcWrite(ledcChannel, 255);
+    }
 
-        patternStartTime = millis();
+    // Surcharge string pour compatibilité avec le code existant
+    void setPattern(const String &p)
+    {
+        if (p == "off")
+            setPattern(OFF);
+        else if (p == "on")
+            setPattern(ON);
+        else if (p == "blink_slow")
+            setPattern(BLINK_SLOW);
+        else if (p == "blink_fast")
+            setPattern(BLINK_FAST);
+        else if (p == "pulse")
+            setPattern(PULSE);
+        else if (p == "heartbeat")
+            setPattern(HEARTBEAT);
     }
 
     void update()
     {
         unsigned long now = millis();
-
-        switch (currentPattern)
+        switch (current)
         {
         case OFF:
-            digitalWrite(pin, LOW);
             break;
-
         case ON:
-            digitalWrite(pin, HIGH);
             break;
 
         case BLINK_SLOW:
             if (now - lastToggle > 1000)
             {
                 state = !state;
-                digitalWrite(pin, state);
+                ledcWrite(ledcChannel, state ? 255 : 0);
                 lastToggle = now;
             }
             break;
@@ -468,29 +474,25 @@ public:
             if (now - lastToggle > 200)
             {
                 state = !state;
-                digitalWrite(pin, state);
+                ledcWrite(ledcChannel, state ? 255 : 0);
                 lastToggle = now;
             }
             break;
 
         case PULSE:
         {
-            int brightness = (sin((now - patternStartTime) / 1000.0 * PI) + 1) * 127;
-            analogWrite(pin, brightness);
+            // ✅ Fix: ledcWrite au lieu d'analogWrite (inexistant sur ESP32 core < 3.x)
+            float phase = (float)(now - patternStart) / 1000.f * PI;
+            uint8_t brightness = (uint8_t)((sinf(phase) + 1.f) * 127.5f);
+            ledcWrite(ledcChannel, brightness);
             break;
         }
 
         case HEARTBEAT:
         {
-            unsigned long phase = (now - patternStartTime) % 2000;
-            if (phase < 100 || (phase > 200 && phase < 300))
-            {
-                digitalWrite(pin, HIGH);
-            }
-            else
-            {
-                digitalWrite(pin, LOW);
-            }
+            unsigned long ph = (now - patternStart) % 2000;
+            bool on = (ph < 100) || (ph > 200 && ph < 300);
+            ledcWrite(ledcChannel, on ? 255 : 0);
             break;
         }
         }
@@ -500,78 +502,62 @@ public:
 // ═══════════════════════════════════════════════════════════
 // FORMATTEUR DE TEMPS
 // ═══════════════════════════════════════════════════════════
-
 class TimeFormatter
 {
 public:
-    static String formatUptime(unsigned long milliseconds)
+    static String formatUptime(unsigned long ms)
     {
-        unsigned long seconds = milliseconds / 1000;
-        unsigned long minutes = seconds / 60;
-        unsigned long hours = minutes / 60;
-        unsigned long days = hours / 24;
-
-        String result = "";
-        if (days > 0)
-            result += String(days) + "j ";
-        if (hours % 24 > 0)
-            result += String(hours % 24) + "h ";
-        if (minutes % 60 > 0)
-            result += String(minutes % 60) + "m ";
-        result += String(seconds % 60) + "s";
-
-        return result;
+        unsigned long s = ms / 1000, m = s / 60, h = m / 60, d = h / 24;
+        String r;
+        if (d > 0)
+            r += String(d) + "j ";
+        if (h % 24 > 0)
+            r += String(h % 24) + "h ";
+        if (m % 60 > 0)
+            r += String(m % 60) + "m ";
+        r += String(s % 60) + "s";
+        return r;
     }
 
     static String formatBytes(size_t bytes)
     {
         if (bytes < 1024)
             return String(bytes) + " B";
-        else if (bytes < 1024 * 1024)
-            return String(bytes / 1024.0, 2) + " KB";
-        else if (bytes < 1024 * 1024 * 1024)
-            return String(bytes / 1024.0 / 1024.0, 2) + " MB";
-        else
-            return String(bytes / 1024.0 / 1024.0 / 1024.0, 2) + " GB";
+        if (bytes < 1024 * 1024)
+            return String(bytes / 1024.f, 2) + " KB";
+        if (bytes < 1024 * 1024 * 1024UL)
+            return String(bytes / 1024.f / 1024.f, 2) + " MB";
+        return String(bytes / 1024.f / 1024.f / 1024.f, 2) + " GB";
     }
 
     static String formatRSSI(int rssi)
     {
-        String quality;
-        if (rssi > -50)
-            quality = "Excellent";
-        else if (rssi > -60)
-            quality = "Bon";
-        else if (rssi > -70)
-            quality = "Moyen";
-        else if (rssi > -80)
-            quality = "Faible";
-        else
-            quality = "Très faible";
-
-        return String(rssi) + " dBm (" + quality + ")";
+        const char *q = rssi > -50   ? "Excellent"
+                        : rssi > -60 ? "Bon"
+                        : rssi > -70 ? "Moyen"
+                        : rssi > -80 ? "Faible"
+                                     : "Très faible";
+        return String(rssi) + " dBm (" + q + ")";
     }
 };
 
 // ═══════════════════════════════════════════════════════════
-// GESTIONNAIRE DE COMMANDES SÉRIE
+// SERIAL COMMANDER
 // ═══════════════════════════════════════════════════════════
-
 class SerialCommander
 {
 private:
-    String buffer = "";
-    void (*commandCallback)(String cmd, String args);
+    String buffer;
+    std::function<void(String, String)> callback; // ✅ Fix: lambda-compatible
 
 public:
-    SerialCommander(void (*callback)(String, String)) : commandCallback(callback) {}
+    explicit SerialCommander(std::function<void(String, String)> cb) : callback(cb) {}
 
     void process()
     {
         while (Serial.available())
         {
             char c = Serial.read();
-
             if (c == '\n' || c == '\r')
             {
                 if (buffer.length() > 0)
@@ -581,9 +567,7 @@ public:
                 }
             }
             else
-            {
                 buffer += c;
-            }
         }
     }
 
@@ -591,118 +575,18 @@ private:
     void processCommand(String input)
     {
         input.trim();
-
-        int spaceIndex = input.indexOf(' ');
-        String cmd, args;
-
-        if (spaceIndex == -1)
-        {
-            cmd = input;
-            args = "";
-        }
-        else
-        {
-            cmd = input.substring(0, spaceIndex);
-            args = input.substring(spaceIndex + 1);
-        }
-
+        int sp = input.indexOf(' ');
+        String cmd = (sp == -1) ? input : input.substring(0, sp);
+        String args = (sp == -1) ? "" : input.substring(sp + 1);
         cmd.toLowerCase();
-        Serial.println("\n> " + cmd + (args.length() > 0 ? " " + args : ""));
-
-        if (commandCallback)
-        {
-            commandCallback(cmd, args);
-        }
+        if (callback)
+            callback(cmd, args);
     }
 };
 
 // ═══════════════════════════════════════════════════════════
-// SYSTÈME DE LOGS avec niveaux
+// BUZZER
 // ═══════════════════════════════════════════════════════════
-
-class Logger
-{
-public:
-    enum Level
-    {
-        DEBUG,
-        INFO,
-        WARNING,
-        ERROR,
-        CRITICAL
-    };
-
-private:
-    Level currentLevel = INFO;
-
-public:
-    bool isEnabled_logger = true;
-
-    void setLevel(Level level) { currentLevel = level; }
-    void setLogger(bool active = true)
-    {
-        isEnabled_logger = active;
-    }
-    void log(Level level, const String &message)
-    {
-        if (level < currentLevel)
-            return;
-
-        String prefix;
-        switch (level)
-        {
-        case DEBUG:
-            prefix = "[DEBUG] ";
-            break;
-        case INFO:
-            prefix = "[INFO] ";
-            break;
-        case WARNING:
-            prefix = "[WARN] ";
-            break;
-        case ERROR:
-            prefix = "[ERROR] ";
-            break;
-        case CRITICAL:
-            prefix = "[CRIT] ";
-            break;
-        }
-        String fullMessage = prefix + message;
-        if (isEnabled_logger)
-            Serial.println(fullMessage);
-    }
-
-    void debug(const String &msg) { log(DEBUG, msg); }
-    void info(const String &msg) { log(INFO, msg); }
-    void warning(const String &msg) { log(WARNING, msg); }
-    void error(const String &msg) { log(ERROR, msg); }
-    void critical(const String &msg) { log(CRITICAL, msg); }
-
-private:
-    String getLevelString(Level level)
-    {
-        switch (level)
-        {
-        case DEBUG:
-            return "debug";
-        case INFO:
-            return "info";
-        case WARNING:
-            return "warning";
-        case ERROR:
-            return "error";
-        case CRITICAL:
-            return "critical";
-        default:
-            return "unknown";
-        }
-    }
-};
-
-// ═══════════════════════════════════════════════════════════
-// SYSTÈME DE GESTION DU BUZZER
-// ═══════════════════════════════════════════════════════════
-
 class Buzzer
 {
 private:
@@ -712,7 +596,7 @@ private:
     unsigned int interval = 0;
 
 public:
-    Buzzer(int p) : pin(p) {}
+    explicit Buzzer(int p) : pin(p) {}
 
     void begin()
     {
@@ -724,17 +608,16 @@ public:
     {
         if (mode == "off")
         {
-            state = false;
-            digitalWrite(pin, LOW);
             interval = 0;
+            digitalWrite(pin, LOW);
         }
         else if (mode == "alert")
         {
-            interval = 100; // bip rapide
+            interval = 100;
         }
         else if (mode == "warning")
         {
-            interval = 500; // bip lent
+            interval = 500;
         }
     }
 

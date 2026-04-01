@@ -6,168 +6,234 @@
 #include <PubSubClient.h>
 #include "utilities.h"
 
-
-
 extern bool wifi_connected;
 extern Logger logger;
-extern void mqttCallback(char* topic, byte* payload, unsigned int length);
+extern void mqttCallback(char *topic, byte *payload, unsigned int length);
 
-class MQTTController {
-  private:
-    const char* mqtt_server;
+// ─── Timeouts (ajustables) ───────────────────────────────
+#define MQTT_SOCKET_TIMEOUT_S 5      // timeout socket TLS (secondes)
+#define MQTT_CONNECT_TIMEOUT_MS 5000 // garde-fou connexion (ms)
+#define MQTT_RECONNECT_MIN_MS 2000   // backoff minimal
+#define MQTT_RECONNECT_MAX_MS 60000  // backoff maximal
+
+class MQTTController
+{
+private:
+    const char *mqtt_server;
     int mqtt_port;
-    const char* mqtt_user;
-    const char* mqtt_password;
+    const char *mqtt_user;
+    const char *mqtt_password;
 
     WiFiClientSecure secureClient;
     PubSubClient client;
 
-    String publishTopic = "";    // topic utilisé pour publish par défaut
-    String subscribeTopic = "";  // topic utilisé pour subscribe par défaut
-    String currentSubscribed = "";// topic auquel on est réellement abonné (pour unsubscribe si changement)
+    String publishTopic = "";
+    String subscribeTopic = "";
+    String currentSubscribed = "";
 
-    // reconnexion
     unsigned long lastReconnectAttempt = 0;
-    unsigned long reconnectInterval = 2000;  // 2s initial
+    unsigned long reconnectInterval = MQTT_RECONNECT_MIN_MS;
 
     String clientId = "ESPClient";
+    bool connecting = false; // ← garde re-entrant
 
-  public:
+public:
     bool isSecure = false;
-    MQTTController(const char* mqtt_server, int mqtt_port, const char* mqtt_user, const char* mqtt_password)
-      : mqtt_server(mqtt_server), mqtt_port(mqtt_port), mqtt_user(mqtt_user), mqtt_password(mqtt_password), client(secureClient) {}
 
-    // begin: prépare le client, n'oublie pas d'appeler setPublishTopic/setSubscribeTopic avant si tu veux
-    void begin() {
-      client.setServer(mqtt_server, mqtt_port);
-      client.setCallback(mqttCallback);
-      // si le Wi-Fi est déjà connecté, tenter une première connexion
-      if (wifi_connected) {
-        connectMQTT();
-      } else {
-        logger.error("MQTT not started (Wi-Fi non connecté). Appelle begin() après connexion ou laissez la loop gérer la reconnexion.");
-      }
+    MQTTController(const char *srv, int port,
+                   const char *user, const char *pass)
+        : mqtt_server(srv), mqtt_port(port),
+          mqtt_user(user), mqtt_password(pass),
+          client(secureClient) {}
+
+    // ── begin ────────────────────────────────────────────
+    void begin()
+    {
+        // Timeout socket AVANT toute connexion
+        secureClient.setTimeout(MQTT_SOCKET_TIMEOUT_S);
+
+        client.setServer(mqtt_server, mqtt_port);
+        client.setSocketTimeout(MQTT_SOCKET_TIMEOUT_S); // PubSubClient >= 2.8
+        client.setKeepAlive(15);                        // keepalive 15 s
+        client.setCallback(mqttCallback);
+
+        if (wifi_connected)
+        {
+            connectMQTT();
+        }
+        else
+        {
+            logger.warning("[MQTT] begin() : WiFi non connecté, connexion différée.");
+        }
     }
 
-    // loop: doit être appelé dans loop()
-    void loop() {
-      if (!wifi_connected) return;
+    // ── loop : NON-BLOQUANT ──────────────────────────────
+    void loop()
+    {
+        if (!wifi_connected)
+            return;
 
-      if (client.connected()) {
-        client.loop();
-      } else {
+        if (client.connected())
+        {
+            client.loop();
+            return;
+        }
+
+        // Backoff exponentiel
         unsigned long now = millis();
-        if (now - lastReconnectAttempt > reconnectInterval) {
-          lastReconnectAttempt = now;
-          if (connectMQTT()) {
-            reconnectInterval = 2000; // reset backoff
-          } else {
-            reconnectInterval = min(reconnectInterval * 2UL, 60000UL);
-          }
+        if (now - lastReconnectAttempt >= reconnectInterval)
+        {
+            lastReconnectAttempt = now;
+            if (connectMQTT())
+            {
+                reconnectInterval = MQTT_RECONNECT_MIN_MS; // reset
+            }
+            else
+            {
+                reconnectInterval = min(reconnectInterval * 2UL,
+                                        (unsigned long)MQTT_RECONNECT_MAX_MS);
+                logger.warning("[MQTT] Prochain essai dans " +
+                               String(reconnectInterval / 1000) + "s");
+            }
         }
-      }
     }
 
-    // publish sur le topic courant
-    bool publish(const char* topic, const String& message) {
-      if (wifi_connected && client.connected()) {
+    // ── publish ──────────────────────────────────────────
+    bool publish(const char *topic, const String &message)
+    {
+        if (!wifi_connected || !client.connected())
+        {
+            logger.error("[MQTT] Publish ignoré (non connecté).");
+            return false;
+        }
         bool ok = client.publish(topic, message.c_str());
-        if (ok) logger.info("MQTT published [" + String(topic) + "] : " + message);
-
-        else logger.error("MQTT publish failed [" + String(topic) + "]");
+        if (ok)
+            logger.info("[MQTT] Publié [" + String(topic) + "] : " + message);
+        else
+            logger.error("[MQTT] Échec publish [" + String(topic) + "]");
         return ok;
-      } else {
-        logger.error("MQTT non connecté. Publish ignoré.");
-        return false;
-      }
     }
 
-    // publish sur le topic de publication configuré
-    bool publish(const String& message) {
-      return publish(publishTopic.c_str(), message);
+    bool publish(const String &message)
+    {
+        return publish(publishTopic.c_str(), message);
     }
 
-    // setters dynamiques pour topics
-    void setPublishTopic(const String& topic) {
-      publishTopic = topic;
-      logger.info(" Publish topic set to: " + publishTopic);
+    // ── setters topics ───────────────────────────────────
+    void setPublishTopic(const String &topic)
+    {
+        publishTopic = topic;
+        logger.info("[MQTT] Publish topic : " + publishTopic);
     }
 
-    // setSubscribeTopic : applique la subscription si déjà connecté (unsubscribe ancien si besoin)
-    void setSubscribeTopic(const String& topic) {
-      if (topic.length() == 0) return;
-      if (subscribeTopic == topic) return; // pas de changement
+    void setSubscribeTopic(const String &topic)
+    {
+        if (topic.isEmpty() || subscribeTopic == topic)
+            return;
+        subscribeTopic = topic;
+        logger.info("[MQTT] Subscribe topic demandé : " + topic);
 
-      logger.info(" Subscribe topic requested: " + topic);
-      subscribeTopic = topic;
-
-      // Si connecté, unsubscribe ancien et subscribe nouveau
-      if (client.connected()) {
-        if (currentSubscribed.length() > 0 && currentSubscribed != subscribeTopic) {
-          if (client.unsubscribe(currentSubscribed.c_str())) {
-            logger.info(" Unsubscribed from: " + currentSubscribed);
-          } else {
-            logger.error(" Failed to unsubscribe from: " + currentSubscribed);
-          }
+        if (!client.connected())
+        {
+            logger.info("[MQTT] Abonnement différé (non connecté).");
+            return;
         }
-        if (client.subscribe(subscribeTopic.c_str())) {
-          currentSubscribed = subscribeTopic;
-          logger.info("Subscribed to: " + subscribeTopic);
-        } else {
-          logger.error(" Failed to subscribe to: " + subscribeTopic);
-        }
-      } else {
-        logger.warning("Will subscribe to " + subscribeTopic + " once connected.");
-      }
+        _applySubscription();
     }
 
-    // option: changer clientId (avant connect)
-    void setClientId(const String& id) {
-      if (id.length() > 0) clientId = id;
-      logger.info("MQTT clientId: " + clientId);
+    void setClientId(const String &id)
+    {
+        if (!id.isEmpty())
+            clientId = id;
+        logger.info("[MQTT] clientId : " + clientId);
     }
 
-    // geteurs
+    // ── TLS ─────────────────────────────────────────────
+    void setSecure(const char *caCert)
+    {
+        secureClient.setCACert(caCert);
+        isSecure = true;
+        logger.info("[MQTT] CA cert configuré.");
+    }
+
+    // ── getters ──────────────────────────────────────────
+    bool isConnected() { return client.connected(); }
     String getPublishTopic() const { return publishTopic; }
     String getSubscribeTopic() const { return subscribeTopic; }
 
-  
-    void setSecure(const char* caCert){
-      secureClient.setCACert(caCert);
-      logger.info("CA cert set");
+    // ── déconnexion propre ───────────────────────────────
+    void disconnect()
+    {
+        if (client.connected())
+            client.disconnect();
+        logger.info("[MQTT] Déconnecté proprement.");
     }
 
+private:
+    // ── connexion (gardée contre re-entrance) ────────────
+    bool connectMQTT()
+    {
+        if (!wifi_connected)
+            return false;
+        if (connecting)
+            return false; // déjà en cours
+        connecting = true;
 
-  
-  private:
-    bool connectMQTT() {
-      if (!wifi_connected) return false;
-      
-      if (!isSecure)secureClient.setInsecure(); //  en prod: utiliser setCACert()
-      
-      ///logger.info("Connexion au broker MQTT... ");
-      if (client.connect(clientId.c_str(), mqtt_user, mqtt_password)) {
-        logger.info("Connecté !");
-        // subscribe au topic configuré
-        if (subscribeTopic.length() > 0) {
-          if (client.subscribe(subscribeTopic.c_str())) {
+        if (!isSecure)
+            secureClient.setInsecure();
+
+        logger.info("[MQTT] Connexion à " + String(mqtt_server) +
+                    ":" + String(mqtt_port) + " ...");
+
+        bool ok = false;
+
+        // client.connect() peut quand même bloquer ≤ MQTT_SOCKET_TIMEOUT_S
+        ok = client.connect(clientId.c_str(), mqtt_user, mqtt_password);
+
+        if (ok)
+        {
+            logger.info("[MQTT] Connecté !");
+            _applySubscription();
+            if (!publishTopic.isEmpty())
+                client.publish(publishTopic.c_str(), "ESP connected");
+        }
+        else
+        {
+            // client.state() retourne un int → String() obligatoire
+            logger.error("[MQTT] Échec connexion, state=" +
+                         String(client.state()));
+        }
+
+        connecting = false;
+        return ok;
+    }
+
+    // ── (re)abonnement ───────────────────────────────────
+    void _applySubscription()
+    {
+        if (subscribeTopic.isEmpty())
+            return;
+
+        // Désabonner l'ancien topic si différent
+        if (!currentSubscribed.isEmpty() &&
+            currentSubscribed != subscribeTopic)
+        {
+            if (client.unsubscribe(currentSubscribed.c_str()))
+                logger.info("[MQTT] Désabonné de : " + currentSubscribed);
+            else
+                logger.error("[MQTT] Échec désabonnement : " + currentSubscribed);
+        }
+
+        if (client.subscribe(subscribeTopic.c_str()))
+        {
             currentSubscribed = subscribeTopic;
-            logger.info("Abonné au topic : " + subscribeTopic);
-          } else {
-            logger.error(" Échec abonnement au topic : " + subscribeTopic);
-          }
+            logger.info("[MQTT] Abonné à : " + subscribeTopic);
         }
-
-        // message d'annonce facultatif
-        if (publishTopic.length() > 0) {
-          client.publish(publishTopic.c_str(), "ESP connected");
+        else
+        {
+            logger.error("[MQTT] Échec abonnement : " + subscribeTopic);
         }
-        return true;
-      } else {
-        logger.critical("Échec connexion MQTT, code="+client.state());
-        return false;
-      }
     }
 };
 
-#endif
+#endif // MQTT_H

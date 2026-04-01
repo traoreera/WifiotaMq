@@ -4,83 +4,82 @@
 
 namespace TimeSync
 {
-    // ===============================
-    //  Paramètres NTP et Fuseau horaire
-    // ===============================
-    static const char *NTP_SERVER = "time.google.com";
-    static const unsigned long TIMEOUT_MS = 20000; // 20 sec
-    static long gmtOffset_sec = 0;                 // Décalage GMT (en secondes)
-    static int daylightOffset_sec = 0;             // Offset heure d’été (en secondes)
+    // ── Paramètres ────────────────────────────────────────
+    constexpr const char *NTP_SERVER = "time.google.com";
+    constexpr unsigned long TIMEOUT_MS = 20000;
 
-    // ===============================
-    //  Initialisation de l'heure
-    // ===============================
+    // Variables d'état (non-static pour éviter les surprises multi-TU)
+    inline long gmtOffset_sec = 0;
+    inline int daylightOffset_sec = 0;
+
+    // ── Initialisation ────────────────────────────────────
     inline void begin(long gmtOffset = 0, int daylightOffset = 0)
     {
         gmtOffset_sec = gmtOffset;
         daylightOffset_sec = daylightOffset;
 
         configTime(gmtOffset_sec, daylightOffset_sec, NTP_SERVER);
-        Serial.print("[TimeSync] Waiting for time sync");
+        Serial.print("[TimeSync] Synchronisation NTP");
 
         unsigned long start = millis();
-        time_t now = 0;
+        struct tm ti{};
 
         while (millis() - start < TIMEOUT_MS)
         {
-            time(&now);
-            if (now > 100000)
+            // ✅ Fix: vérifier l'année plutôt qu'un timestamp brut
+            //    tm_year est le nombre d'années depuis 1900 ; > 100 = après l'an 2000
+            if (getLocalTime(&ti) && ti.tm_year > 100)
             {
-                Serial.println("\n[TimeSync] Time synchronized.");
+                Serial.println("\n[TimeSync] Heure synchronisée.");
                 return;
             }
-            Serial.print(".");
+            Serial.print('.');
             delay(500);
         }
 
-        Serial.println("\n[TimeSync] Failed to sync time within timeout.");
+        Serial.println("\n[TimeSync] Échec de synchronisation (timeout).");
     }
 
-    // ===============================
-    //  Timestamp complet
-    // ===============================
+    // ── Timestamp complet ─────────────────────────────────
     inline String timestamp()
     {
-        time_t now;
-        struct tm timeinfo;
-        time(&now);
-        localtime_r(&now, &timeinfo);
+        struct tm ti{};
+        if (!getLocalTime(&ti))
+            return "N/A";
 
-        char buffer[30];
-        strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
-        return String(buffer);
+        char buf[24];
+        strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &ti);
+        return String(buf);
     }
 
-    // ===============================
-    //  Heure simplifiée
-    // ===============================
+    // ── Heure courte ──────────────────────────────────────
     inline String shortTime()
     {
-        time_t now;
-        struct tm timeinfo;
-        time(&now);
-        localtime_r(&now, &timeinfo);
+        struct tm ti{};
+        if (!getLocalTime(&ti))
+            return "N/A";
 
-        char buffer[12];
-        strftime(buffer, sizeof(buffer), "%H:%M:%S", &timeinfo);
-        return String(buffer);
+        char buf[10];
+        strftime(buf, sizeof(buf), "%H:%M:%S", &ti);
+        return String(buf);
     }
 
-    // ===============================
-    //  Infos de débogage
-    // ===============================
+    // ── Est-ce que l'heure est valide ? ───────────────────
+    inline bool isSynced()
+    {
+        struct tm ti{};
+        return getLocalTime(&ti) && ti.tm_year > 100;
+    }
+
+    // ── Debug ─────────────────────────────────────────────
     inline void info()
     {
         Serial.println("===== TimeSync Info =====");
-        Serial.printf("NTP Server: %s\n", NTP_SERVER);
-        Serial.printf("GMT Offset: %ld sec (%.1f h)\n", gmtOffset_sec, gmtOffset_sec / 3600.0);
-        Serial.printf("DST Offset: %d sec (%.1f h)\n", daylightOffset_sec, daylightOffset_sec / 3600.0);
-        Serial.printf("Current Time: %s\n", timestamp().c_str());
+        Serial.printf("NTP Server : %s\n", NTP_SERVER);
+        Serial.printf("GMT Offset : %ld s (%.1f h)\n", gmtOffset_sec, gmtOffset_sec / 3600.0f);
+        Serial.printf("DST Offset : %d s (%.1f h)\n", daylightOffset_sec, daylightOffset_sec / 3600.0f);
+        Serial.printf("Synced     : %s\n", isSynced() ? "oui" : "non");
+        Serial.printf("Heure      : %s\n", timestamp().c_str());
         Serial.println("=========================");
     }
 }

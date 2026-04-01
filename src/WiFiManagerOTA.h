@@ -13,16 +13,16 @@
 #include "utilities.h"
 
 extern bool wifi_connected;
-
-
+extern Logger logger; // ✅ Fix: nom unifié avec mqtt.h
 
 class WiFiManagerOTA
 {
 public:
+    // ── Structures publiques ──────────────────────────────
     struct MQTTConfig
     {
         String hostname;
-        int port;
+        int port = 8883;
         String user;
         String password;
         String client;
@@ -32,56 +32,54 @@ public:
     {
         String ssid;
         String password;
-        bool useStaticIP;  
-        String staticIP;   
-        String subnet;    
-        String gateway;    
-        String dns1;       
-        String dns2;    
+        bool useStaticIP = false;
+        String staticIP;
+        String subnet;
+        String gateway;
+        String dns1;
+        String dns2;
     };
 
-    void setLogger(bool active =true);
+    // ── Cycle de vie ──────────────────────────────────────
+    WiFiManagerOTA(uint16_t port = 80,
+                   const char *user = "admin",
+                   const char *pass = "admin123");
 
-    WiFiManagerOTA(uint16_t port = 80, const char *user = "admin", const char *pass = "admin123");
-
-    // Lifecycle
     void begin(String hostname, String apName, String apPassword);
     void loop();
     void handleWiFiReconnect();
 
-    // Config management
+    // ── Gestion de config ─────────────────────────────────
     void loadConfig();
     void loadMqttConfig();
     void saveConfig();
     void saveMqttConfig();
     void resetConfig();
 
-    // WiFi connection
+    // ── Connexion WiFi ────────────────────────────────────
     bool connectToWiFi(int maxAttempts = 20, int delayMs = 500);
     void startAccessPoint(String apName, String password);
 
-    // Topic helpers
+    // ── Topics MQTT ───────────────────────────────────────
     String pubTopic(String version);
     String cmdTopic(String version, String cmd);
 
-    // Getters
+    // ── Getters ───────────────────────────────────────────
     MQTTConfig getMqttConfig();
     WiFiConfigStruct getWiFiConfig();
     bool hasValidConfig();
+    bool isConnected() const { return wifi_connected; }
+
+    // ── Logger ────────────────────────────────────────────
+    void setLogger(bool active = true);
 
 private:
+    // ── Config interne (contient topic et user_id en plus) ─
     struct WiFiConfig
     {
-        String ssid;
-        String password;
-        String topic;
-        String user_id;
-        bool useStaticIP;  
-        String staticIP;   
-        String subnet;    
-        String gateway;    
-        String dns1;       
-        String dns2;  
+        String ssid, password, topic, user_id;
+        bool useStaticIP = false;
+        String staticIP, subnet, gateway, dns1, dns2;
     };
 
     Preferences prefs;
@@ -90,17 +88,21 @@ private:
     MQTTConfig mqtt_config;
     String otaUser;
     String otaPass;
-    unsigned long lastReconnectAttempt;
 
-    // Web pages HTML
+    // ✅ Fix: redémarrage différé (évite delay() dans les handlers async)
+    bool pendingRestart = false;
+    unsigned long restartScheduledAt = 0;
+    void scheduleRestart(unsigned long delayMs = 1200);
+
+    unsigned long lastReconnectAttempt = 0;
+
+    // ── Routes web ────────────────────────────────────────
     void setupRoutes();
     void handleConfigPage(AsyncWebServerRequest *request);
-    String formatUptime();
 
-    // HTML templates
-    const String &getIndexHtml();
-    const String &getConfigHtml();
-    const String &getMqttConfigHtml();
+    // ── Helpers ───────────────────────────────────────────
+    String formatUptime();
+    bool authenticate(AsyncWebServerRequest *request); // helper d'auth
 };
 
 #endif
