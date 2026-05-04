@@ -51,7 +51,7 @@ void setup()
     // start the server and configure hostname using dns server => http://esp32ota.local
     // set esp as an access point wiht name esp32-ota
     // and password esp32-pass
-    server.begin("esp32ota", "esp32-ota","esp32-pass"); 
+    server.begin("esp32ota", "esp32-ota","esp32-pass");
     // after this you can create an mqtt client and connect to the broker
 
     if (wifi_connected){
@@ -65,8 +65,8 @@ void setup()
         mqttController->setClientId(cliendId);
         mqttController->setPublishTopic(server.pubTopic("/fire/")); // this for publish
         mqttController->setSubscribeTopic(server.cmdTopic("/fire/", "b0x1323")); // this for calback
-        
-        //security 
+
+        //security
         mqttController->isSecure = false; // this line is important you can remove it if you want
         mqttController->begin();
     }
@@ -81,7 +81,7 @@ void loop()
     if(wifi_connected){
         mqttController->loop(); // this fonction test reconnection wifi and mqtt
     }
-    // exemple of json mqtt message for send 
+    // exemple of json mqtt message for send
     String json = "{";
     json += "\"ssid\":\"" + String(WiFi.SSID()) + "\",";
     json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
@@ -94,7 +94,7 @@ void loop()
     json += "}";
 
     unsigned long now = millis();
-    if (now - lastSensorRead > sensorInterval) { // every one mm this conde send json message 
+    if (now - lastSensorRead > sensorInterval) { // every one mm this conde send json message
         logger.info(json);
         lastSensorRead = now;
         mqttController->publish(mqttController->getPublishTopic().c_str(), json);
